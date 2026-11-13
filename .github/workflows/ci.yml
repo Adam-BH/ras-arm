@@ -13,8 +13,10 @@ jobs:
           path: ~/.platformio
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
       - run: pip install platformio
-      - name: Golden IK vectors are up to date
-        run: python3 tools/ik_reference.py && git diff --exit-code firmware/test sim/src/core/__tests__
+      - name: Golden IK vectors and the ROS twin config are up to date
+        run: |
+          python3 tools/ik_reference.py && python3 tools/gen_ros_config.py
+          git diff --exit-code firmware/test sim/src/core/__tests__ ros2/ras_arm_description/config
       - name: Build for the UNO
         run: pio run -e uno
         working-directory: firmware
@@ -37,3 +39,21 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  ros2:
+    runs-on: ubuntu-latest
+    container: ros:lyrical-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test dependencies
+        run: |
+          apt-get update
+          rosdep update --rosdistro lyrical
+          rosdep install --from-paths ros2 --ignore-src -y --rosdistro lyrical -t buildtool -t build -t test
+      - name: Build, test (URDF vs config.h and the firmware's golden IK vectors)
+        shell: bash
+        run: |
+          source /opt/ros/lyrical/setup.bash
+          colcon build --base-paths ros2
+          colcon test --base-paths ros2 --event-handlers console_direct+
+          colcon test-result --verbose

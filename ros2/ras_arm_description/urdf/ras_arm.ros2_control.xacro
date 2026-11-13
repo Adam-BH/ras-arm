@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!-- ros2_control in Gazebo: position-commanded joints (steppers and hobby servos are position
+     devices), starting at the HOME pose; grip_right mimics grip_left like the real linkage. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="position_joint" params="name initial">
+    <joint name="${name}">
+      <command_interface name="position"/>
+      <state_interface name="position"><param name="initial_value">${initial}</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="ras_arm_ros2_control" params="controllers">
+    <ros2_control name="RasArmGazebo" type="system">
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
+      <xacro:property name="home" value="${arm['cell']['home_joints']}"/>
+      <xacro:position_joint name="J1" initial="${home[0]}"/>
+      <xacro:position_joint name="J2" initial="${home[1]}"/>
+      <xacro:position_joint name="J3" initial="${home[2]}"/>
+      <xacro:position_joint name="J4" initial="${home[3]}"/>
+      <xacro:position_joint name="J5" initial="${home[4]}"/>
+      <xacro:position_joint name="J6" initial="${home[5]}"/>
+      <xacro:position_joint name="grip_left" initial="${arm['gripper']['open']}"/>
+      <joint name="grip_right">
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>${controllers}</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+</robot>

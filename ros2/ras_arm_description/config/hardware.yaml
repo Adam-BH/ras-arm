@@ -1,0 +1,19 @@
+# Actuator datasheet values → URDF effort limits; rough link masses until the CAD gives real ones.
+# Sources: docs/wiring_pinout.md parts list + manufacturer datasheets (holding / stall torque).
+effort:              # N·m at the joint (N for the fingers)
+  J1: 0.40           # 17HS4401 0.40 N·m, direct drive
+  J2: 6.2            # 17HS4401S 0.40 N·m × PG518 5.18 × GT2 16T→48T 3
+  J3: 2.0            # 17HS4401 0.40 N·m × GT2 16T→80T 5
+  J4: 2.1            # DS3218MG 21.5 kg·cm @ 6.8 V
+  J5: 2.1            # DS3218MG
+  J6: 1.08           # MG996R 11 kg·cm @ 6 V
+  finger: 20.0       # MG996R through the gripper linkage, estimate
+mass:                # kg, placeholder estimates (motors from datasheets + printed parts)
+  base_link: 1.5     # base plate, J1 motor 17HS4401 (0.28)
+  turret: 1.1        # 17HS4401S + PG518 (≈ 0.55), J3 17HS4401 (0.28), brackets, bearings
+  upper_arm: 0.25
+  forearm: 0.12      # DS3218MG J4 (0.06) + bracket
+  forearm_roll: 0.15 # DS3218MG J5 (0.06) + link
+  wrist: 0.09        # MG996R J6 (0.055) + bracket
+  tool: 0.12         # MG996R gripper (0.055) + gripper body
+  finger: 0.01

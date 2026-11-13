@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<!-- The workcell around the arm, from config.h (via arm.yaml): base plate (top = table level), the
+     cradle with its IR sensor at (cradle_x, 0), bin A (red) at +y, bin B (blue) at −y. Static in Gazebo. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ras_cell">
+  <xacro:property name="arm" value="${xacro.load_yaml('$(find ras_arm_description)/config/arm.yaml')}"/>
+  <xacro:property name="cell" value="${arm['cell']}"/>
+  <xacro:property name="BIN" value="0.11"/>     <!-- bin outside size, wall height: same as the web twin -->
+  <xacro:property name="BIN_H" value="0.06"/>
+
+  <material name="plate"><color rgba="0.16 0.18 0.22 1"/></material>
+  <material name="cradle"><color rgba="0.36 0.40 0.47 1"/></material>
+  <material name="sensor"><color rgba="0.61 0.35 0.71 1"/></material>
+  <material name="bin_a"><color rgba="0.48 0.17 0.17 1"/></material>
+  <material name="bin_b"><color rgba="0.15 0.25 0.48 1"/></material>
+
+  <xacro:macro name="block" params="name size xyz material">
+    <link name="${name}">
+      <visual><origin xyz="${xyz}"/><geometry><box size="${size}"/></geometry><material name="${material}"/></visual>
+      <collision><origin xyz="${xyz}"/><geometry><box size="${size}"/></geometry></collision>
+      <inertial><mass value="1"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial>
+    </link>
+    <joint name="${name}_joint" type="fixed"><parent link="cell"/><child link="${name}"/></joint>
+  </xacro:macro>
+
+  <xacro:macro name="bin" params="name y material">
+    <xacro:block name="${name}_n" size="${BIN} 0.004 ${BIN_H}" xyz="0 ${y + BIN / 2} ${BIN_H / 2}" material="${material}"/>
+    <xacro:block name="${name}_s" size="${BIN} 0.004 ${BIN_H}" xyz="0 ${y - BIN / 2} ${BIN_H / 2}" material="${material}"/>
+    <xacro:block name="${name}_e" size="0.004 ${BIN} ${BIN_H}" xyz="${BIN / 2} ${y} ${BIN_H / 2}" material="${material}"/>
+    <xacro:block name="${name}_w" size="0.004 ${BIN} ${BIN_H}" xyz="${-BIN / 2} ${y} ${BIN_H / 2}" material="${material}"/>
+  </xacro:macro>
+
+  <link name="world"/>
+  <joint name="cell_joint" type="fixed"><parent link="world"/><child link="cell"/></joint>
+  <link name="cell">
+    <visual><origin xyz="0.06 0 -0.005"/><geometry><box size="0.56 0.64 0.01"/></geometry><material name="plate"/></visual>
+    <collision><origin xyz="0.06 0 -0.005"/><geometry><box size="0.56 0.64 0.01"/></geometry></collision>
+    <inertial><mass value="5"/><inertia ixx="0.2" ixy="0" ixz="0" iyy="0.2" iyz="0" izz="0.3"/></inertial>
+  </link>
+
+  <!-- cradle: a U block holding the cube over the colour sensor, IR beam across it -->
+  <xacro:block name="cradle_l" size="0.04 0.008 0.016" xyz="${cell['cradle_x']} 0.02 0.008" material="cradle"/>
+  <xacro:block name="cradle_r" size="0.04 0.008 0.016" xyz="${cell['cradle_x']} -0.02 0.008" material="cradle"/>
+  <xacro:block name="colour_sensor" size="0.014 0.014 0.002" xyz="${cell['cradle_x']} 0 0.001" material="sensor"/>
+  <xacro:block name="ir_sensor" size="0.014 0.010 0.018" xyz="${cell['cradle_x']} -0.048 0.0125" material="plate"/>
+
+  <xacro:bin name="bin_a" y="${cell['bin_y']}" material="bin_a"/>
+  <xacro:bin name="bin_b" y="${-cell['bin_y']}" material="bin_b"/>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

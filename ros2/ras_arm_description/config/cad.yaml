@@ -1,0 +1,19 @@
+# CAD → twin, the hand-written part. The generated part (mesh file + mass properties per link) is
+# cad_meshes.yaml, written by tools/cad_import.py. Until a link has a mesh it is drawn with placeholder
+# shapes (same sizes as the web twin). The kinematics never depend on these files: only where meshes go.
+# Export the CAD in the zero pose: every joint at 0 → arm straight up, fingers up, facing +x (the cradle),
+# origin on the J1 axis at table level, z up. See ros2/README.md "CAD".
+offsets:               # m, measured on the CAD
+  d4: 0.0              # elbow (J3 axis) → J4 forearm-roll joint, along the forearm
+  d6: 0.0              # wrist (J5 axis) → J6 wrist-roll joint, along the gripper
+  export_opening: 0.0  # gripper opening in the exported pose
+materials:             # colour of each link's mesh
+  base_link: dark
+  turret: dark
+  upper_arm: orange
+  forearm: orange
+  forearm_roll: orange
+  wrist: grey
+  tool: grey
+  finger_left: light
+  finger_right: light

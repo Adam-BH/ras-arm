@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- Top level. sim:=true adds ros2_control + the Gazebo plugin (controllers:= the controller YAML). -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ras_arm">
+  <xacro:arg name="sim" default="false"/>
+  <xacro:arg name="controllers" default=""/>
+
+  <xacro:include filename="$(find ras_arm_description)/urdf/ras_arm.xacro"/>
+
+  <link name="world"/>
+  <xacro:ras_arm parent="world"/>
+
+  <xacro:if value="$(arg sim)">
+    <xacro:include filename="$(find ras_arm_description)/urdf/ras_arm.ros2_control.xacro"/>
+    <xacro:ras_arm_ros2_control controllers="$(arg controllers)"/>
+  </xacro:if>
+</robot>
