@@ -6,7 +6,8 @@ colour, an E18 IR beam sees the cube arrive, NC limit switches home the arm, a l
 
 This repo holds the **firmware** (C, PlatformIO, 6 strict layers, 23 PC tests) and a **React app**
 (3D digital twin + move-to + teach mode over USB, plus a virtual mode that runs the whole firmware
-logic in the browser without a board).
+logic in the browser without a board), with a **vision pick-and-place** mode: an overhead camera
+finds cubes anywhere on the table and the app sorts them, checking each pick with the camera.
 
 > 📷 *Photo of the arm: placeholder* · 🗺️ *Workcell diagram: placeholder*
 
@@ -73,7 +74,7 @@ Shield clone with Z− on D12? Add `-DLIMIT_Z_ON_D12` to `build_flags` in `platf
 cd sim
 npm i
 npm run dev                    # http://localhost:5173
-npm test                       # Vitest: protocol, golden IK vectors, virtual cycle/teach
+npm test                       # Vitest: protocol, golden IK vectors, virtual cycle/teach, vision
 npm run build                  # static site in sim/dist (GitHub Pages ready)
 ```
 - **Virtual** mode: no board needed. The TypeScript twin of the firmware runs the same protocol and
@@ -81,7 +82,18 @@ npm run build                  # static site in sim/dist (GitHub Pages ready)
 - **USB** mode: **Chrome or Edge** (Web Serial). Connect → pick the Arduino.
 - Panels: 3D workcell to scale · Move-to (MOVE/LINE checked with the TS IK, MOVEJ/GRIP sliders) ·
   Teach (jog pad, per-joint jog, save/go poses, colour calibration) · Run (HOME/RUN/STOP/RESET, live
-  state diagram, cycle counter) · Telemetry plots (20 s) · Serial console.
+  state diagram, cycle counter) · Vision · Telemetry plots (20 s) · Serial console.
+
+## Vision pick-and-place (sim/src/vision/)
+An overhead camera in the twin finds red and blue cubes **anywhere on the table**: HSV threshold →
+blobs → every pixel mapped to the table (homography) → centre + yaw (4-fold moments) + shape filters.
+**Sort by vision** then loops: look → pick the nearest cube (fingers turned to its yaw) → look again to
+check it left the table (slip → retry with jiggle) → drop it in its bin. Host side only, over the normal
+`MOVE`/`GRIP` protocol: no firmware change. Measured: ≤ 0.72 mm and ≤ 2.3° over 200 cubes in noisy synthetic frames.
+Virtual mode: Connect → **Scatter 4 cubes** → **Sort by vision**. → [docs/vision.md](docs/vision.md)
+
+<img src="docs/img/vision-sort.png" width="620" alt="Vision sort: the 3D twin with the camera's field of view, and the camera view with the detected cubes">
+
 
 ## Teach mode in 30 seconds
 Enter TEACH → jog the open gripper around a cube in the cradle → **Save CUBE** → same for BIN_A,
@@ -97,9 +109,10 @@ firmware/            PlatformIO project (env uno, env native)
 sim/                 Vite + React 18 + TypeScript + react-three-fiber + zustand
   src/link/          ArmLink interface, SerialLink (Web Serial), VirtualLink, protocol.ts
   src/core/          kinematics.ts (port of the C IK), virtualFirmware.ts (FSM + motion twin)
-  src/scene/         3D workcell, arm, cube, sensors
+  src/vision/        camera geometry, detection, grasp planning, the vision sort loop
+  src/scene/         3D workcell, arm, cube, sensors, overhead camera
   src/panels/        UI panels
-docs/                architecture, state machine, kinematics, wiring, protocol, teach mode, decisions
+docs/                architecture, state machine, kinematics, wiring, protocol, teach mode, decisions, vision
 tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/L2 torque sweep)
 .github/workflows/   CI: build uno, native tests, sim tests + build
 ```

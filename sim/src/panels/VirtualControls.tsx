@@ -12,9 +12,9 @@ export function VirtualControls() {
     <section className="panel">
       <h2>Virtual world</h2>
       <div className="row">
-        <button className="red" disabled={!!w.cube} onClick={() => poke(() => fw.placeCube('RED'))}>Place red cube</button>
-        <button className="blue" disabled={!!w.cube} onClick={() => poke(() => fw.placeCube('BLUE'))}>Place blue cube</button>
-        <button disabled={w.cube?.where !== 'cradle'} onClick={() => poke(() => fw.removeCube())}>Remove</button>
+        <button className="red" disabled={!!w.cradle} onClick={() => poke(() => fw.placeCube('RED'))}>Place red cube</button>
+        <button className="blue" disabled={!!w.cradle} onClick={() => poke(() => fw.placeCube('BLUE'))}>Place blue cube</button>
+        <button disabled={!w.cradle} onClick={() => poke(() => fw.removeCube())}>Remove</button>
       </div>
       <div className="row">
         <button className={w.failNextPick ? 'on' : ''} onClick={() => poke(() => fw.failNextPick())}>Next pick fails{w.failNextPick ? ' ✓' : ''}</button>
@@ -26,7 +26,7 @@ export function VirtualControls() {
           <label key={j} className="check"><input type="checkbox" checked={w.brokenSwitch[j]} onChange={e => poke(() => fw.breakSwitch(j, e.target.checked))} />J{j + 1}</label>
         ))}
       </div>
-      <div className="muted small">bins: A (red) {w.bins.A} · B (blue) {w.bins.B} · cube: {w.cube ? `${w.cube.colour} in ${w.cube.where}` : 'none'}</div>
+      <div className="muted small">bins: A (red) {w.bins.A} · B (blue) {w.bins.B} · cradle: {w.cradle ?? 'empty'} · gripper: {w.held ?? 'empty'} · table: {w.table.length}</div>
     </section>
   );
 }

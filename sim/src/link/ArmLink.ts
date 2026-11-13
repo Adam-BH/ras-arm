@@ -9,7 +9,7 @@ export interface ArmLink {
   disconnect(): void;
   send(cmd: string): Promise<Reply>;
   onTelemetry(cb: (t: Telemetry) => void): void;
-  onEvent(cb: (e: string) => void): void;                 // "EV …" and "DONE …" lines (prefix kept)
+  onEvent(cb: (e: string) => void): () => void;           // "EV …" and "DONE …" lines (prefix kept); returns unsubscribe
   onLog(cb: (dir: LogDir, line: string) => void): void;   // every raw line, for the console
   onStatus(cb: (connected: boolean, info: string) => void): void;
 }
@@ -30,7 +30,7 @@ export abstract class BaseLink implements ArmLink {
   protected abstract write(line: string): Promise<void> | void;
 
   onTelemetry(cb: (t: Telemetry) => void) { this.tel.push(cb); }
-  onEvent(cb: (e: string) => void) { this.ev.push(cb); }
+  onEvent(cb: (e: string) => void) { this.ev.push(cb); return () => { this.ev = this.ev.filter(f => f !== cb); }; }
   onLog(cb: (d: LogDir, l: string) => void) { this.log.push(cb); }
   onStatus(cb: (c: boolean, i: string) => void) { this.status.push(cb); }
 

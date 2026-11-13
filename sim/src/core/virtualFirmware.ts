@@ -10,9 +10,12 @@ import { fk, ik, withinLimits, type Pose } from './kinematics';
 import { COLOURS, ERRORS, POSE_NAMES, STATES, type Colour, type StateName } from '../link/protocol';
 
 type CubeColour = 'RED' | 'BLUE';
+export type LooseCube = { colour: CubeColour; x: number; y: number; yaw: number };   // mm, deg
 export type World = {
-  cube: { colour: CubeColour; where: 'cradle' | 'gripper' } | null;
-  failNextPick: boolean;        // the next grasp slips: cube stays in the cradle
+  cradle: CubeColour | null;    // cube sitting in the cradle (IR beam, colour sensor)
+  held: CubeColour | null;      // cube in the gripper
+  table: LooseCube[];           // loose cubes anywhere on the table (vision sort)
+  failNextPick: boolean;        // the next grasp slips: the cube stays where it is
   powerOk: boolean;             // false = E-stop pressed
   brokenSwitch: boolean[];      // NC wire cut → reads "pressed" forever
   bins: { A: number; B: number };
@@ -23,6 +26,9 @@ const SENSOR: Record<'RED' | 'BLUE' | 'EMPTY', Rgbc> = {
   RED: { r: 620, g: 180, b: 150, c: 950 }, BLUE: { r: 140, g: 260, b: 560, c: 900 }, EMPTY: { r: 60, g: 65, b: 70, c: 200 },
 };
 const TICK_MS = 5;
+// a loose cube is held only when the closed fingers are on it and lined up with its faces
+const GRASP = { posMm: 10, rollDeg: 12 };
+const wrap45 = (deg: number) => ((deg % 90) + 135) % 90 - 45;
 const clamp = (j: number, v: number) => Math.min(JOINT_MAX[j], Math.max(JOINT_MIN[j], v));
 const REASON = { state: 'state', busy: 'busy', running: 'running', unreachable: 'unreachable', limit: 'limit', estop: 'estop' } as const;
 type Why = keyof typeof REASON | null;
@@ -40,7 +46,7 @@ function trapezoid(k: number) {
 export class VirtualFirmware {
   now = 0;
   q = [20, 40, 90, 0, 0, 0, GRIP_OPEN_MM];       // true joint values (arm left in an unknown pose)
-  world: World = { cube: null, failNextPick: false, powerOk: true, brokenSwitch: [false, false, false], bins: { A: 0, B: 0 } };
+  world: World = { cradle: null, held: null, table: [], failNextPick: false, powerOk: true, brokenSwitch: [false, false, false], bins: { A: 0, B: 0 } };
   private out: (line: string) => void;
 
   constructor(out: (line: string) => void) { this.out = out; this.boot(); }
@@ -115,14 +121,14 @@ export class VirtualFirmware {
   limits(): [boolean, boolean, boolean] { return [this.limit(0), this.limit(1), this.limit(2)]; }
   private estop() { return !this.world.powerOk; }
   private updateSensors() {
-    const raw = this.world.cube?.where === 'cradle';
+    const raw = !!this.world.cradle;
     if (raw !== this.irStable) {
       if (!this.irRawSince) this.irRawSince = this.now;
       if (this.now - this.irRawSince >= (raw ? TIMING.irStable : 20)) { this.irStable = raw; this.irRawSince = 0; }
     } else this.irRawSince = 0;
   }
   ir() { return this.irStable; }
-  private reading(): Rgbc { return this.world.cube?.where === 'cradle' ? SENSOR[this.world.cube.colour] : SENSOR.EMPTY; }
+  private reading(): Rgbc { return this.world.cradle ? SENSOR[this.world.cradle] : SENSOR.EMPTY; }
 
   // ───────────── decisions (port of decisions.c) ─────────────
   params: Record<string, number> = {
@@ -238,19 +244,26 @@ export class VirtualFirmware {
   // ───────────── world physics: grasp and release ─────────────
   private slipped = false;
   private updateWorld() {
-    const tip = this.where(), cube = this.world.cube, g = this.q[6];
+    const tip = this.where(), w = this.world, g = this.q[6];
     const near = (p: { x: number; y: number }, r: number) => Math.hypot(tip.x - p.x, tip.y - p.y) < r;
-    if (cube?.where === 'cradle' && g <= GRIP_CLOSED_MM + 1 && near(CELL.cube, 15) && tip.z < CELL.cube.z + 20 && !this.slipped) {
-      if (this.world.failNextPick) { this.world.failNextPick = false; this.slipped = true; }
-      else cube.where = 'gripper';
+    if (!w.held && g <= GRIP_CLOSED_MM + 1 && !this.slipped) {
+      const cradle = !!w.cradle && near(CELL.cube, 15) && tip.z < CELL.cube.z + 20;
+      const loose = cradle ? -1 : w.table.findIndex(c =>
+        near(c, GRASP.posMm) && tip.z < CELL.cubeSize + 15 && Math.abs(wrap45(tip.roll - c.yaw)) < GRASP.rollDeg);
+      if (cradle || loose >= 0) {
+        if (w.failNextPick) { w.failNextPick = false; this.slipped = true; }
+        else if (cradle) { w.held = w.cradle; w.cradle = null; }
+        else { w.held = w.table[loose].colour; w.table.splice(loose, 1); }
+      }
     }
     if (g > GRIP_CLOSED_MM + 5) {
       this.slipped = false;
-      if (cube?.where === 'gripper') {
-        if (near(CELL.binA, 50)) { this.world.bins.A++; this.world.cube = null; }
-        else if (near(CELL.binB, 50)) { this.world.bins.B++; this.world.cube = null; }
-        else if (near(CELL.cube, 15)) cube.where = 'cradle';
-        else this.world.cube = null;               // dropped on the table
+      if (w.held) {
+        if (near(CELL.binA, 50)) w.bins.A++;
+        else if (near(CELL.binB, 50)) w.bins.B++;
+        else if (near(CELL.cube, 15) && !w.cradle) w.cradle = w.held;
+        else w.table.push({ colour: w.held, x: tip.x, y: tip.y, yaw: wrap45(tip.roll) });   // dropped: lands under the gripper
+        w.held = null;
       }
     }
   }
@@ -468,8 +481,10 @@ export class VirtualFirmware {
   }
 
   // ───────────── virtual-mode extras (buttons in the UI) ─────────────
-  placeCube(colour: CubeColour) { if (!this.world.cube) this.world.cube = { colour, where: 'cradle' }; }
-  removeCube() { if (this.world.cube?.where === 'cradle') this.world.cube = null; }
+  placeCube(colour: CubeColour) { if (!this.world.cradle) this.world.cradle = colour; }
+  removeCube() { this.world.cradle = null; }
+  scatter(cubes: LooseCube[]) { this.world.table = cubes.map(c => ({ ...c })); }
+  clearTable() { this.world.table = []; }
   failNextPick() { this.world.failNextPick = true; }
   setPower(ok: boolean) { this.world.powerOk = ok; }
   breakSwitch(j: number, broken: boolean) { this.world.brokenSwitch[j] = broken; }

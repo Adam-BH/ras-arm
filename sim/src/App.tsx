@@ -5,6 +5,7 @@ import { RunPanel } from './panels/RunPanel';
 import { TelemetryPanel } from './panels/TelemetryPanel';
 import { ConsolePanel } from './panels/ConsolePanel';
 import { VirtualControls } from './panels/VirtualControls';
+import { VisionPanel } from './panels/VisionPanel';
 import { Workcell } from './scene/Workcell';
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
         <div className="col left"><MovePanel /><TeachPanel /></div>
         <div className="col center">
           <section className="panel scene"><Workcell /></section>
+          <VisionPanel />
           <TelemetryPanel />
         </div>
         <div className="col right"><RunPanel /><VirtualControls /><ConsolePanel /></div>

@@ -64,6 +64,16 @@ table.poses button { padding: 1px 6px; font-size: 11px; margin-left: 2px; }
 .console .log { height: 230px; overflow: auto; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; background: #111418; border-radius: 6px; padding: 6px; }
 .l-out { color: var(--accent); } .l-in { color: #b9e0c3; } .l-info { color: var(--muted); font-style: italic; }
 .l-err { color: var(--bad); } .l-ev { color: #8fb8ff; }
+.vision-body { display: flex; gap: 12px; flex-wrap: wrap; }
+.vision .cam { flex: 1 1 300px; max-width: 400px; }
+.vision canvas { width: 100%; height: auto; aspect-ratio: 4 / 3; display: block; background: #15181d; border-radius: 6px; }
+.vision .side { flex: 1 1 220px; min-width: 0; }
+.vision .row:first-child { margin-top: 0; }
+.sort-status { margin: 6px 0; }
+.badge.ph-pick, .badge.ph-place { background: var(--accent); color: #1a1a1a; }
+.badge.ph-look, .badge.ph-verify { background: #1d4f4f; color: #9fdede; }
+.badge.ph-done { color: var(--ok); } .badge.ph-error { background: var(--bad); color: #fff; } .badge.ph-stopped { color: var(--warn); }
+table.dets td:first-child { white-space: nowrap; }
 @media (max-width: 1100px) {
   .grid { grid-template-columns: 1fr; padding: 12px 16px; }
   .panel.scene { height: 360px; }

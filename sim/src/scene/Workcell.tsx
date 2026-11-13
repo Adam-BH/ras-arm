@@ -5,6 +5,7 @@ import { Html, OrbitControls } from '@react-three/drei';
 import { Arm } from './Arm';
 import { Cube } from './Cube';
 import { Sensors } from './Sensors';
+import { VisionCamera } from './VisionCamera';
 import { CELL, GRIP_CLOSED_MM } from '../core/config';
 import { useArm, useVirtualFw } from '../store/useArm';
 
@@ -35,8 +36,7 @@ export function Workcell() {
   // where is the cube? virtual: the simulated world knows. USB: infer from state, IR and grip.
   let held: string | null = null, inCradle: string | null = null;
   if (fw) {
-    const c = fw.world.cube;
-    if (c?.where === 'gripper') held = c.colour; else if (c) inCradle = c.colour;
+    held = fw.world.held; inCradle = fw.world.cradle;
   } else if (tel) {
     const holding = ['PICK', 'VERIFY', 'PLACE'].includes(tel.state) && tel.joints[6] <= GRIP_CLOSED_MM + 1 && !tel.ir;
     if (holding) held = cubeColour;
@@ -68,6 +68,8 @@ export function Workcell() {
         <Arm joints={joints} held={held} />
         <Sensors ir={tel?.ir ?? false} limits={tel?.limits ?? [false, false, false]} />
         {inCradle && <Cube colour={inCradle} x={CELL.cube.x} y={0} />}
+        {fw?.world.table.map((c, i) => <Cube key={i} colour={c.colour} x={c.x} y={c.y} yaw={c.yaw} />)}
+        <VisionCamera />
       </group>
       <OrbitControls target={[0.6, 0.9, 0]} makeDefault />
     </Canvas>
