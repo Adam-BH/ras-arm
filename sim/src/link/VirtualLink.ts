@@ -14,8 +14,8 @@ export class VirtualLink extends BaseLink {
   }
 
   async connect() {
-    this.connected = true;
-    this.fw = new VirtualFirmware(line => { if (this.connected) this.handleLine(line); });  // fresh boot
+    this.connected = true;                            // one VirtualLink = one boot (the store makes a new one per Connect)
+    this.fw.boot();                                   // now connected: the "EV BOOT" line is heard
     if (this.opts.autoTick !== false) {
       const p = this.opts.periodMs ?? 20;
       this.timer = setInterval(() => this.fw.tick(p), p);
