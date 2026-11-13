@@ -1,0 +1,10 @@
+# Files that run on Linux / WSL keep LF even on Windows checkouts (a CRLF shebang breaks
+# `ros2 run …`: "env: 'python3\r': No such file or directory").
+*.py            text eol=lf
+*.sh            text eol=lf
+*.xacro         text eol=lf
+*.sdf           text eol=lf
+*.rviz          text eol=lf
+package.xml     text eol=lf
+CMakeLists.txt  text eol=lf
+ros2/**/*.yaml  text eol=lf
