@@ -32,7 +32,8 @@ static void o_i(int32_t v) {
   do { d[k++] = (char)('0' + u % 10); u /= 10; } while (u);
   while (k) o_c(d[--k]);
 }
-static int32_t r10(float v) { return (int32_t)(v * 10.0f + (v < 0 ? -0.5f : 0.5f)); }  // ×10, rounded
+static int32_t rmm(float v) { return (int32_t)(v + (v < 0 ? -0.5f : 0.5f)); }          // rounded
+static int32_t r10(float v) { return rmm(v * 10.0f); }                                   // ×10, rounded
 static void o_f1(float v) {                                   // one decimal, no printf("%f")
   int32_t t = r10(v);
   if (t < 0) { o_c('-'); t = -t; }
@@ -145,7 +146,7 @@ static void telemetry(uint32_t now) {
   pose_t p; task_where(&p);
   on = 0; o_p(PSTR("T,")); o_i((int32_t)now); o_c(','); o_p(flash_nth(PSTR(STATE_NAMES), fsm_state()));
   for (uint8_t j = 0; j < NJ; j++) { o_c(','); o_i(r10(joint_angle(j))); }
-  o_c(','); o_i(r10(p.x) / 10); o_c(','); o_i(r10(p.y) / 10); o_c(','); o_i(r10(p.z) / 10);
+  o_c(','); o_i(rmm(p.x)); o_c(','); o_i(rmm(p.y)); o_c(','); o_i(rmm(p.z));
   o_c(','); o_i(ir_object()); o_c(','); o_i(fsm_last_colour()); o_c(','); o_i(fsm_error()); o_c(',');
   for (uint8_t i = 0; i < N_STEPPERS; i++) o_c(limit_pressed(i) ? '1' : '0');
   o_c(','); o_i(estop_active());
