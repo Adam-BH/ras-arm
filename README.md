@@ -83,21 +83,22 @@ npm run build                  # static site in sim/dist (GitHub Pages ready)
   Teach (jog pad, per-joint jog, save/go poses, colour calibration) · Run (HOME/RUN/STOP/RESET, live
   state diagram, cycle counter) · Telemetry plots (20 s) · Serial console.
 
-## ROS 2 + Gazebo twin (ros2/)
-The arm as a ROS 2 robot (Lyrical + Gazebo Jetty): URDF with the firmware's joint names, zero and signs,
-the workcell, ros2_control (trajectory controller + mimic gripper), and the RUN cycle on the twin with the
-firmware's IK and timings. Every number comes from `config.h` (`tools/gen_ros_config.py`, checked in CI);
-the CAD goes in with `tools/cad_import.py` (STEP or per-link STL → meshes + mass properties).
-```bash
-ros2 launch ras_arm_gazebo sim.launch.py        # Gazebo: workcell, arm, cubes, controllers
-ros2 run ras_arm_gazebo demo_cycle.py --bin A   # the RUN cycle on the twin
-```
-Setup, firmware ↔ ROS conventions, CAD export: [ros2/README.md](ros2/README.md).
-
 ## Teach mode in 30 seconds
 Enter TEACH → jog the open gripper around a cube in the cradle → **Save CUBE** → same for BIN_A,
 BIN_B, HOME → CAL RED / CAL BLUE / CAL EMPTY with the cube on the sensor → Leave TEACH → RUN.
 Walkthrough and bench test checklist: [docs/teach_mode.md](docs/teach_mode.md).
+
+## ROS 2 + Gazebo twin (ros2/)
+The arm as a ROS 2 robot (Lyrical + Gazebo Jetty): URDF with the firmware's joint names, zero and signs,
+the workcell, ros2_control (trajectory controllers, mimic gripper), and the RUN cycle on the twin with the
+firmware's IK and timings, grasping the cube for real (physics). Every number comes from `config.h`
+(`tools/gen_ros_config.py`, checked in CI); the CAD goes in with `tools/cad_import.py` (STEP or
+per-link STL → meshes + mass properties).
+```bash
+ros2 launch ras_arm_gazebo sim.launch.py              # Gazebo: workcell, arm, cubes, controllers
+ros2 run ras_arm_gazebo demo_cycle.py --bin A --check # the RUN cycle on the twin, cube in bin A?
+```
+Setup (incl. Windows / WSL), firmware ↔ ROS conventions, CAD export: [ros2/README.md](ros2/README.md).
 
 ## Folder map
 ```
@@ -111,10 +112,10 @@ sim/                 Vite + React 18 + TypeScript + react-three-fiber + zustand
   src/scene/         3D workcell, arm, cube, sensors
   src/panels/        UI panels
 docs/                architecture, state machine, kinematics, wiring, protocol, teach mode, decisions
+tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/L2 torque sweep)
+.github/workflows/   CI: build uno, native tests, sim tests + build
 ros2/                ROS 2 twin: ras_arm_description (URDF, workcell, tests), ras_arm_gazebo (sim, control)
-tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/L2 torque sweep),
-                     gen_ros_config.py (config.h → ROS), cad_import.py (CAD → twin meshes)
-.github/workflows/   CI: build uno, native tests, sim tests + build, ROS 2 build + tests
+                     + tools/gen_ros_config.py (config.h → ROS), tools/cad_import.py (CAD → meshes), CI job ros2
 ```
 
 ## Kinematics, decisions
