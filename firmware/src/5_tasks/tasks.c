@@ -10,13 +10,18 @@ static bool colour_ok;
 void tasks_init(void) {
   sensors_init();
   colour_ok = colour_init();
-  motion_init();                                      // joints, steppers ON, servos neutral, taught poses
+  motion_init();                                      // joints, steppers ON, servos neutral
+  stations_init();                                    // workcell layout: EEPROM or CAD defaults
   decide_reset();
   uint16_t n; void *cal = decide_cal_data(&n);
   storage_load(EE_ADDR_CAL, EE_MAGIC_CAL, cal, n);     // bad CRC → defaults stay
 }
 
-void tasks_update(uint32_t now) { sensors_update(now); motion_update(now); }
+static int8_t pv = -1;                                // ST GO preview: station to line down onto
+void tasks_update(uint32_t now) {
+  sensors_update(now); motion_update(now);
+  if (pv >= 0 && !motion_busy()) { pose_t g = stations_grip((uint8_t)pv); pv = -1; motion_line(&g, PREVIEW_MM_S); }
+}
 bool task_servos_ok(void)       { return motion_servos_ok(); }
 bool task_colour_ok(void)       { return colour_ok; }
 
@@ -70,7 +75,7 @@ task_status_t task_homing_update(uint32_t now) {
       break;
     case H_NEXT:
       if (++hi < N_STEPPERS) { hp = H_START; break; }
-      { pose_t home = pose_get(POSE_HOME);
+      { pose_t home = stations_grip(STATION_HOME);
         if (!motion_to(&home, MOVE_HOME_MS)) return hfail(PSTR("home_pose")); }
       hp = H_GO_HOME;
       break;
@@ -108,8 +113,9 @@ static pphase_t pp; static pose_t p_grip, p_above; static uint8_t p_attempt; sta
 void task_pick_start(uint8_t attempt) {
   float dx, dy, dr; decide_grip_offset(attempt, &dx, &dy, &dr);
   p_attempt = attempt;
-  p_grip = pose_get(POSE_CUBE); p_grip.x += dx; p_grip.y += dy; p_grip.roll += dr;
-  p_above = p_grip; p_above.z = SAFE_Z;
+  uint8_t i = (uint8_t)stations_find_type(STN_PICK, 0);   // always exists (protected)
+  p_grip = stations_grip(i); p_grip.x += dx; p_grip.y += dy; p_grip.roll += dr;
+  p_above = p_grip; p_above.z = stations_above(i).z;
   motion_grip(GRIP_OPEN_MM, GRIP_MOVE_MS);
   pp = motion_to(&p_above, MOVE_ABOVE_MS) ? P_ABOVE : P_END;
 }
@@ -139,8 +145,9 @@ typedef enum { L_TRANSIT, L_DOWN, L_OPEN, L_UP, L_END } lphase_t;
 static lphase_t lp; static pose_t l_drop, l_above;
 
 void task_place_start(colour_t c) {
-  l_drop = pose_get(c == COL_RED ? POSE_BIN_A : POSE_BIN_B);
-  l_above = l_drop; l_above.z = SAFE_Z + PLACE_ABOVE_DZ;
+  int8_t i = stations_bin_for(c);                      // colour → bin map (ST MAP)
+  if (i < 0) { lp = L_END; return; }
+  l_drop = stations_grip((uint8_t)i); l_above = stations_above((uint8_t)i);
   lp = motion_to(&l_above, MOVE_TRANSIT_MS) ? L_TRANSIT : L_END;
 }
 
@@ -160,7 +167,7 @@ task_status_t task_place_update(uint32_t now) {
 
 // ════════════════════════ RETURN ════════════════════════
 static bool r_ok;
-void task_return_start(void) { pose_t h = pose_get(POSE_HOME); r_ok = motion_to(&h, MOVE_HOME_MS); }
+void task_return_start(void) { pose_t h = stations_grip(STATION_HOME); r_ok = motion_to(&h, MOVE_HOME_MS); }
 task_status_t task_return_update(uint32_t now) {
   (void)now;
   if (!r_ok) return TASK_FAILED;
@@ -174,14 +181,24 @@ bool task_movej(const angles_t *a, uint32_t ms) { return motion_joints(a, ms); }
 bool task_jog(float dx, float dy, float dz, float dr) { return motion_jog(dx, dy, dz, dr); }
 bool task_jogj(uint8_t j, float delta)         { return motion_jog_joint(j, delta); }
 void task_grip(float mm)                       { motion_grip(mm, GRIP_MOVE_MS); }
-bool task_busy(void)                           { return motion_busy(); }
-void task_stop(void)                           { motion_stop(); }
+bool task_busy(void)                           { return motion_busy() || pv >= 0; }
+void task_stop(void)                           { pv = -1; motion_stop(); }
 void task_where(pose_t *out)                   { motion_where(out); }
 
 // ════════════════════════ TEACH ════════════════════════
-void   task_teach_save(pose_id_t id) { pose_t p; motion_where(&p); pose_save(id, &p); }
-bool   task_teach_go(pose_id_t id)   { pose_t p = pose_get(id); return motion_to(&p, MOVE_HOME_MS); }
-pose_t task_pose(pose_id_t id)       { return pose_get(id); }
+st_err_t task_teach_save(uint8_t i) {                  // SAVE <name>: here, validated, committed at once
+  pose_t p; motion_where(&p);
+  st_err_t e = stations_set(i, &p, stations_get(i)->above_dz);
+  if (!e) stations_commit();
+  return e;
+}
+bool task_teach_go(uint8_t i)  { pose_t p = stations_grip(i); return motion_to(&p, MOVE_HOME_MS); }
+bool task_preview_start(uint8_t i) {                   // ST GO: above the station, then a slow line down
+  pose_t a = stations_above(i);
+  if (!motion_to(&a, MOVE_HOME_MS)) return false;
+  pv = (int8_t)i;
+  return true;
+}
 
 void task_calibrate_finish(colour_t c, const rgbc_t *avg) {
   decide_colour_calibrate(c, avg);

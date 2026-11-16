@@ -2,7 +2,7 @@
 // Decides WHAT the robot does now. One switch(state), checked every loop, never blocks.
 #pragma once
 #include "../config.h"
-#include "../4_motion/motion.h"
+#include "../4_motion/stations.h"
 
 typedef enum { ST_BOOT, ST_HOMING, ST_IDLE, ST_READ_COLOUR, ST_PICK, ST_VERIFY,
                ST_PLACE, ST_RETURN, ST_TEACH, ST_ERROR, ST_ESTOP, ST_COUNT } state_t;
@@ -15,7 +15,8 @@ typedef enum { E_NONE, E_HOME_FAILED, E_COLOUR_UNKNOWN, E_PICK_FAILED,
 typedef enum { CMD_HOME, CMD_RUN, CMD_STOP, CMD_TEACH, CMD_DONE, CMD_RESET } cmd_t;
 
 // answer to every request: R_OK or the reason it was refused (→ "ERR <CMD> <reason>")
-typedef enum { R_OK, R_STATE, R_BUSY, R_RUNNING, R_UNREACHABLE, R_LIMIT, R_ESTOP } fsm_reply_t;
+// R_ST + st_err_t = a station refused by the validation (reason from ST_ERR_NAMES)
+typedef enum { R_OK, R_STATE, R_BUSY, R_RUNNING, R_UNREACHABLE, R_LIMIT, R_ESTOP, R_ST } fsm_reply_t;
 #define REPLY_REASONS "ok\0state\0busy\0running\0unreachable\0limit\0estop"
 
 void        fsm_init(void);
@@ -29,8 +30,10 @@ fsm_reply_t fsm_movej(const angles_t *a, uint32_t ms);
 fsm_reply_t fsm_jog(float dx, float dy, float dz, float droll);
 fsm_reply_t fsm_jogj(uint8_t j, float delta);
 fsm_reply_t fsm_grip(float mm);
-fsm_reply_t fsm_save(pose_id_t id);
-fsm_reply_t fsm_go(pose_id_t id);
+fsm_reply_t fsm_save(uint8_t station);    // current tip → station (validated, committed)
+fsm_reply_t fsm_go(uint8_t station);
+fsm_reply_t fsm_preview(uint8_t station); // ST GO: above, then slow line down
+bool        fsm_teaching(void);           // ST edits are accepted only in TEACH
 fsm_reply_t fsm_calibrate(colour_t c);
 fsm_reply_t fsm_can_tune(void);           // SET allowed now?
 

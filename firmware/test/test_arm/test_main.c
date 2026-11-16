@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include "../../src/4_motion/kinematics.h"
 #include "../../src/4_motion/motion.h"
+#include "../../src/4_motion/stations.h"
 #include "../../src/3_joints/joints.h"
 #include "../../src/5_tasks/decisions.h"
 #include "../../src/6_app/fsm.h"
@@ -60,6 +61,7 @@ static int count_replies(const char *log, const char *name) {   // lines "OK <na
   }
   return n;
 }
+static pose_t station_pose(const char *name) { int8_t i = stations_find(name); TEST_ASSERT_TRUE(i >= 0); return stations_grip((uint8_t)i); }
 static void assert_counters_match_motors(void) {
   for (int i = 0; i < 3; i++) TEST_ASSERT_FLOAT_WITHIN(0.2f, fake_true_deg(i), stepper_pos(i) / SPD_ALL[i]);
 }
@@ -180,14 +182,113 @@ void test_rehome_rule_and_set(void) {
 void test_eeprom_crc(void) {
   fake_wipe_eeprom();
   pose_t p[2] = {{1, 2, 3, 4}, {5, 6, 7, 8}}, q[2] = {{0}};
-  TEST_ASSERT_FALSE(storage_load(EE_ADDR_POSES, EE_MAGIC_POSES, q, sizeof q));      // blank chip
-  storage_save(EE_ADDR_POSES, EE_MAGIC_POSES, p, sizeof p);
-  TEST_ASSERT_TRUE(storage_load(EE_ADDR_POSES, EE_MAGIC_POSES, q, sizeof q));
+  TEST_ASSERT_FALSE(storage_load(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, q, sizeof q));      // blank chip
+  storage_save(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, p, sizeof p);
+  TEST_ASSERT_TRUE(storage_load(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, q, sizeof q));
   TEST_ASSERT_EQUAL_FLOAT(7, q[1].z);
-  fake_eeprom()[EE_ADDR_POSES + 5] ^= 0x40;                // flip one bit
+  fake_eeprom()[EE_ADDR_STATIONS + 5] ^= 0x40;                // flip one bit
   pose_t r[2] = {{9, 9, 9, 9}, {9, 9, 9, 9}};
-  TEST_ASSERT_FALSE(storage_load(EE_ADDR_POSES, EE_MAGIC_POSES, r, sizeof r));
+  TEST_ASSERT_FALSE(storage_load(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, r, sizeof r));
   TEST_ASSERT_EQUAL_FLOAT(9, r[0].x);                      // untouched → caller keeps CAD defaults
+}
+
+// ════════════════════ stations (workcell as data) ════════════════════
+static st_err_t val(float x, float y, float z, float roll, uint8_t type) {
+  pose_t p = {x, y, z, roll}; return stations_validate(&p, STATION_ABOVE_DZ, type, -1);
+}
+void test_stations_defaults_valid(void) {
+  fake_wipe_eeprom(); stations_init();
+  TEST_ASSERT_EQUAL(4, stations_count());
+  TEST_ASSERT_FALSE(stations_dirty());
+  TEST_ASSERT_EQUAL(0, stations_find("HOME")); TEST_ASSERT_EQUAL(1, stations_find_type(STN_PICK, 0));
+  TEST_ASSERT_EQUAL(-1, stations_find_type(STN_PICK, 1));
+  for (uint8_t i = 0; i < stations_count(); i++) {          // every CAD station passes with the v2 lengths
+    pose_t p = stations_grip(i);
+    TEST_ASSERT_EQUAL_MESSAGE(STE_OK, stations_validate(&p, stations_get(i)->above_dz, stations_get(i)->type, (int8_t)i), stations_get(i)->name);
+  }
+  TEST_ASSERT_EQUAL(stations_find("BIN_A"), stations_bin_for(COL_RED));
+  TEST_ASSERT_EQUAL(stations_find("BIN_B"), stations_bin_for(COL_BLUE));
+  TEST_ASSERT_EQUAL(-1, stations_bin_for(COL_UNKNOWN));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -90.0f, station_pose("BIN_B").roll);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, CELL_GRIP_Z + STATION_ABOVE_DZ > SAFE_Z ? CELL_GRIP_Z + STATION_ABOVE_DZ : SAFE_Z,
+                           stations_above(1).z);            // approach never below SAFE_Z
+}
+void test_stations_validation_codes(void) {
+  fake_wipe_eeprom(); stations_init();
+  TEST_ASSERT_EQUAL(STE_OK,          val(150, 150, 80, 45, STN_BIN));   // a 3rd bin between A and the cradle
+  TEST_ASSERT_EQUAL(STE_UNREACHABLE, val(600, 0, 50, 0, STN_PARK));
+  TEST_ASSERT_EQUAL(STE_SINGULAR,    val(329.8f, 0, 10, 0, STN_PARK));   // arm almost straight: cos J3 > 0.995
+  TEST_ASSERT_EQUAL(STE_LIMIT,       val(-200, -10, 50, 0, STN_PARK));   // J1 ≈ −177°
+  TEST_ASSERT_EQUAL(STE_LIMIT,       val(-20, 220, 80, 95, STN_BIN));    // J1 95°: inside the joint, outside the working range
+  TEST_ASSERT_EQUAL(STE_LIMIT,       val(200, 0, 80, 120, STN_BIN));     // J6 = roll − J1 = 120° > 90°
+  TEST_ASSERT_EQUAL(STE_KEEPOUT,     val(220, 100, 5, 0, STN_BIN));      // through the table
+  TEST_ASSERT_EQUAL(STE_KEEPOUT,     val(60, 0, 100, 0, STN_PARK));      // inside the base column
+  TEST_ASSERT_EQUAL(STE_KEEPOUT,     val(0, 160, 50, 90, STN_BIN));      // drop below the bin wall
+  TEST_ASSERT_EQUAL(STE_TOO_CLOSE,   val(220, 40, 80, 0, STN_BIN));      // on top of the cradle
+  TEST_ASSERT_EQUAL(STE_OK,          val(220, 40, 80, 0, STN_PARK));     // park poses have no footprint
+}
+void test_stations_table_edits(void) {
+  fake_wipe_eeprom(); stations_init();
+  pose_t p = {150, 150, 80, 45}, q = {150, -150, 80, -45};
+  TEST_ASSERT_EQUAL(STE_OK, stations_add("REJECT", STN_BIN, &p, STATION_ABOVE_DZ));
+  TEST_ASSERT_TRUE(stations_dirty());
+  TEST_ASSERT_EQUAL(4, stations_find("REJECT"));
+  TEST_ASSERT_EQUAL(STE_NAME, stations_add("REJECT", STN_BIN, &q, STATION_ABOVE_DZ));    // duplicate
+  TEST_ASSERT_EQUAL(STE_NAME, stations_add("bad name", STN_BIN, &q, STATION_ABOVE_DZ));
+  TEST_ASSERT_EQUAL(STE_NAME, stations_add("TOOLONGNAME", STN_BIN, &q, STATION_ABOVE_DZ));
+  TEST_ASSERT_EQUAL(STE_FULL, stations_add("CUBE2", STN_PICK, &q, STATION_ABOVE_DZ));     // one pick station
+  TEST_ASSERT_EQUAL(STE_TOO_CLOSE, stations_add("NEAR", STN_BIN, &p, STATION_ABOVE_DZ));  // on REJECT
+  TEST_ASSERT_EQUAL(5, stations_count());                                                 // refused = not added
+  TEST_ASSERT_EQUAL(STE_OK, stations_set(4, &q, 40));                                     // move it
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, -150, stations_grip(4).y);
+  TEST_ASSERT_EQUAL(40, stations_get(4)->above_dz);
+  pose_t far = {600, 0, 80, 0};
+  TEST_ASSERT_EQUAL(STE_UNREACHABLE, stations_set(4, &far, 40));
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, -150, stations_grip(4).y);                              // refused = unchanged
+  TEST_ASSERT_EQUAL(STE_PROTECTED, stations_delete(0));                                   // HOME
+  TEST_ASSERT_EQUAL(STE_PROTECTED, stations_delete(1));                                   // the pick station
+  TEST_ASSERT_EQUAL(STE_OK, stations_map(COL_UNKNOWN, 4));
+  TEST_ASSERT_EQUAL(STE_NAME, stations_map(COL_RED, 0));                                  // HOME is not a bin
+  TEST_ASSERT_EQUAL(STE_OK, stations_delete(2));                                          // BIN_A: map follows
+  TEST_ASSERT_EQUAL(-1, stations_bin_for(COL_RED));
+  TEST_ASSERT_EQUAL(2, stations_bin_for(COL_BLUE));                                       // BIN_B moved 3 → 2
+  TEST_ASSERT_EQUAL(3, stations_bin_for(COL_UNKNOWN));                                    // REJECT moved 4 → 3
+  static const pose_t more[] = {{0, 220, 78, 90}, {150, 150, 80, 45}, {230, 90, 80, 21}, {230, -90, 80, -21}};
+  static const char *const names[] = {"B1", "B2", "B3", "B4"};
+  for (int k = 0; k < 4; k++) TEST_ASSERT_EQUAL_MESSAGE(STE_OK, stations_add(names[k], STN_BIN, &more[k], STATION_ABOVE_DZ), names[k]);
+  TEST_ASSERT_EQUAL(MAX_STATIONS, stations_count());
+  pose_t b = {-60, 200, 80, 90};
+  TEST_ASSERT_EQUAL(STE_FULL, stations_add("MORE", STN_BIN, &b, STATION_ABOVE_DZ));
+}
+void test_stations_eeprom(void) {
+  fake_wipe_eeprom(); stations_init();
+  pose_t p = {150, 150, 80, 45};
+  TEST_ASSERT_EQUAL(STE_OK, stations_add("REJECT", STN_BIN, &p, 50));
+  TEST_ASSERT_EQUAL(STE_OK, stations_map(COL_UNKNOWN, 4));
+  stations_revert();                                        // not committed → gone
+  TEST_ASSERT_EQUAL(4, stations_count());
+  TEST_ASSERT_EQUAL(STE_OK, stations_add("REJECT", STN_BIN, &p, 50));
+  TEST_ASSERT_EQUAL(STE_OK, stations_map(COL_UNKNOWN, 4));
+  uint8_t v = stations_layout_version();
+  stations_commit();
+  TEST_ASSERT_EQUAL(v + 1, stations_layout_version());
+  stations_factory(); stations_init();                      // "reboot"
+  TEST_ASSERT_EQUAL(5, stations_count());
+  TEST_ASSERT_EQUAL(4, stations_bin_for(COL_UNKNOWN));
+  TEST_ASSERT_EQUAL(50, stations_get(4)->above_dz);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, 150, stations_grip(4).y);
+  TEST_ASSERT_EQUAL(v + 1, stations_layout_version());
+  uint8_t buf[256]; uint16_t len = 1;                       // old record version (valid CRC) → CAD defaults
+  while (len < sizeof buf && !storage_load(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, buf, len)) len++;   // = record size
+  TEST_ASSERT_LESS_THAN(sizeof buf, len);
+  buf[0] = STATIONS_REC_VERSION + 1;
+  storage_save(EE_ADDR_STATIONS, EE_MAGIC_STATIONS, buf, len);
+  stations_init();
+  TEST_ASSERT_EQUAL(4, stations_count()); TEST_ASSERT_EQUAL(-1, stations_find("REJECT"));
+  stations_add("REJECT", STN_BIN, &p, 50); stations_commit();
+  fake_eeprom()[EE_ADDR_STATIONS + 9] ^= 0x10;              // corrupt CRC → CAD defaults
+  stations_init();
+  TEST_ASSERT_EQUAL(4, stations_count()); TEST_ASSERT_FALSE(stations_dirty());
 }
 
 // ════════════════════ homing ════════════════════
@@ -265,6 +366,8 @@ void test_unknown_colour_is_error(void) {
 }
 void test_teach_over_serial(void) {
   TEST_ASSERT_TRUE(boot(20, 40, 90));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("MOVE 200 0 70"), "OK MOVE"));   // near the table: a pose CUBE can really have
+  TEST_ASSERT_TRUE(run_until_log("DONE MOVE", 5000));              // (its approach, 60 mm higher, must be reachable)
   TEST_ASSERT_EQUAL(1, count_replies(cmd("TEACH"), "TEACH"));
   TEST_ASSERT_EQUAL(ST_TEACH, fsm_state());
   pose_t before; motion_where(&before);
@@ -274,7 +377,7 @@ void test_teach_over_serial(void) {
   TEST_ASSERT_NOT_NULL(strstr(cmd("JOG 0 0 1"), "ERR JOG busy"));   // one move at a time
   TEST_ASSERT_TRUE(run_until_log("DONE JOG", 3000));
   TEST_ASSERT_NOT_NULL(strstr(cmd("SAVE CUBE"), "OK SAVE"));
-  TEST_ASSERT_FLOAT_WITHIN(1.0f, before.z - 20, pose_get(POSE_CUBE).z);
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, before.z - 20, station_pose("CUBE").z);
   TEST_ASSERT_NOT_NULL(strstr(cmd("JOGJ 1 15"), "OK JOGJ"));
   TEST_ASSERT_TRUE(run_until_log("DONE JOGJ", 3000));
   TEST_ASSERT_FLOAT_WITHIN(0.2f, 15.0f, joint_angle(J1));
@@ -294,9 +397,9 @@ void test_teach_over_serial(void) {
   TEST_ASSERT_EQUAL(1, count_replies(cmd("DONE"), "DONE"));
   TEST_ASSERT_EQUAL(ST_IDLE, fsm_state());
   // taught pose + calibration survive a reboot (EEPROM, CRC)
-  float z_cube = pose_get(POSE_CUBE).z;
+  float z_cube = station_pose("CUBE").z;
   fake_reset(0, 30, 90); fsm_init();
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, z_cube, pose_get(POSE_CUBE).z);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, z_cube, station_pose("CUBE").z);
 }
 void test_move_replies(void) {
   TEST_ASSERT_TRUE(boot(20, 40, 90));
@@ -403,6 +506,10 @@ int main(void) {
   RUN_TEST(test_jiggle_pattern);
   RUN_TEST(test_rehome_rule_and_set);
   RUN_TEST(test_eeprom_crc);
+  RUN_TEST(test_stations_defaults_valid);
+  RUN_TEST(test_stations_validation_codes);
+  RUN_TEST(test_stations_table_edits);
+  RUN_TEST(test_stations_eeprom);
   RUN_TEST(test_homing_unknown_start);
   RUN_TEST(test_homing_start_on_switch);
   RUN_TEST(test_homing_broken_wire);

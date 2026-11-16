@@ -178,7 +178,9 @@ fsm_reply_t fsm_command(cmd_t cmd, uint32_t now) {
       running = false; enter(ST_TEACH, now); return R_OK;
     case CMD_DONE:
       if (st != ST_TEACH) return R_STATE;
-      cal_target = COL_UNKNOWN; enter(ST_IDLE, now); return R_OK;
+      cal_target = COL_UNKNOWN; enter(ST_IDLE, now);
+      if (stations_dirty()) console_event(PSTR("WARN"), PSTR("uncommitted_layout"), -1);   // stays in RAM until reset
+      return R_OK;
     case CMD_RESET:
       if (st != ST_ERROR && st != ST_ESTOP) return R_STATE;
       if (estop_active()) return R_ESTOP;
@@ -203,7 +205,9 @@ fsm_reply_t fsm_movej(const angles_t *a, uint32_t ms) { GUARD(false); return sta
 fsm_reply_t fsm_grip(float mm)                        { GUARD(false); task_grip(mm); return started(true, R_OK); }
 fsm_reply_t fsm_jog(float dx, float dy, float dz, float dr) { GUARD(true); return started(task_jog(dx, dy, dz, dr), R_UNREACHABLE); }
 fsm_reply_t fsm_jogj(uint8_t j, float d)              { GUARD(true); return started(task_jogj(j, d), R_LIMIT); }
-fsm_reply_t fsm_go(pose_id_t id)                      { GUARD(true); return started(task_teach_go(id), R_UNREACHABLE); }
-fsm_reply_t fsm_save(pose_id_t id)                    { GUARD(true); task_teach_save(id); return R_OK; }
+fsm_reply_t fsm_go(uint8_t i)                         { GUARD(true); return started(task_teach_go(i), R_UNREACHABLE); }
+fsm_reply_t fsm_preview(uint8_t i)                    { GUARD(true); return started(task_preview_start(i), R_UNREACHABLE); }
+fsm_reply_t fsm_save(uint8_t i)                       { GUARD(true); st_err_t e = task_teach_save(i); return e ? (fsm_reply_t)(R_ST + e) : R_OK; }
+bool        fsm_teaching(void)                        { return st == ST_TEACH; }
 fsm_reply_t fsm_calibrate(colour_t c)                 { GUARD(true); cal_target = c; task_colour_start(); return R_OK; }
 fsm_reply_t fsm_can_tune(void)                        { return (st == ST_IDLE || st == ST_TEACH) ? R_OK : R_STATE; }

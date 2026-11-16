@@ -4,10 +4,11 @@
 #pragma once
 #include "../config.h"
 #include "../4_motion/motion.h"
+#include "../4_motion/stations.h"
 
 typedef enum { TASK_RUNNING, TASK_DONE, TASK_FAILED } task_status_t;
 
-void tasks_init(void);                     // sensors, colour sensor, motion, decisions + calibration
+void tasks_init(void);                     // sensors, colour sensor, motion, stations, decisions + calibration
 void tasks_update(uint32_t now);           // sensors debounce + motion, every loop
 bool task_servos_ok(void);                 // PCA9685 answered
 bool task_colour_ok(void);                 // TCS34725 answered
@@ -32,7 +33,7 @@ void task_stop(void);
 void task_where(pose_t *out);
 
 // teach mode
-void   task_teach_save(pose_id_t id);
-bool   task_teach_go(pose_id_t id);
-pose_t task_pose(pose_id_t id);
+st_err_t task_teach_save(uint8_t station);   // current tip → station, validated + committed
+bool     task_teach_go(uint8_t station);     // straight to the grip pose
+bool     task_preview_start(uint8_t station); // above, then slow line down (task_busy until done)
 void   task_calibrate_finish(colour_t c, const rgbc_t *avg);   // store + persist (EEPROM)

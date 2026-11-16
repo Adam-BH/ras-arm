@@ -86,9 +86,9 @@ static void handle(char *line, uint32_t now) {
       o_p(PSTR(" homed=")); o_i(fsm_homed()); o_p(PSTR(" running=")); o_i(fsm_running());
       o_send(); return;
     case C_POSES:
-      for (uint8_t i = 0; i < POSE_COUNT; i++) {
-        pose_t p = task_pose((pose_id_t)i);
-        on = 0; o_p(PSTR("POSE ")); o_p(flash_nth(PSTR(POSE_NAMES), i));
+      for (uint8_t i = 0; i < stations_count(); i++) {
+        pose_t p = stations_grip(i);
+        on = 0; o_p(PSTR("POSE ")); o_s(stations_get(i)->name);
         o_c(' '); o_f1(p.x); o_c(' '); o_f1(p.y); o_c(' '); o_f1(p.z); o_c(' '); o_f1(p.roll); o_send();
       }
       break;
@@ -120,9 +120,9 @@ static void handle(char *line, uint32_t now) {
     case C_SAVE: case C_GO: {
       if (argc != 1) { err_reply(cmd, PSTR("args")); return; }
       upcase(tok[1]);
-      int8_t id = flash_find(PSTR(POSE_NAMES), POSE_COUNT, tok[1]);
+      int8_t id = stations_find(tok[1]);
       if (id < 0) { err_reply(cmd, PSTR("pose")); return; }
-      r = c == C_SAVE ? fsm_save((pose_id_t)id) : fsm_go((pose_id_t)id);
+      r = c == C_SAVE ? fsm_save((uint8_t)id) : fsm_go((uint8_t)id);
       is_move = c == C_GO; break; }
     case C_CAL: {
       if (argc != 1) { err_reply(cmd, PSTR("args")); return; }
@@ -137,7 +137,7 @@ static void handle(char *line, uint32_t now) {
       if (r == R_OK && !decide_set(tok[1], v)) { err_reply(cmd, PSTR("key")); return; }
       break; }
   }
-  if (r != R_OK) { err_reply(cmd, flash_nth(PSTR(REPLY_REASONS), r)); return; }
+  if (r != R_OK) { err_reply(cmd, r >= R_ST ? flash_nth(PSTR(ST_ERR_NAMES), r - R_ST) : flash_nth(PSTR(REPLY_REASONS), r)); return; }
   ok(cmd); o_send();
   if (is_move) pending_done = c;
 }

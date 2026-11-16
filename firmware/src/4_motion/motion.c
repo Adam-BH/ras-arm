@@ -1,21 +1,9 @@
-// LAYER 4 — MOTION · moves & saved poses
+// LAYER 4 — MOTION · moves
 #include "motion.h"
 #include "../3_joints/joints.h"
-#include "../2_devices/storage.h"
 #include <math.h>
 
-static pose_t poses[POSE_COUNT];
 static bool   servos_ok;
-
-void poses_defaults(void) {                     // from the CAD workcell layout
-  const pose_t d[POSE_COUNT] = {
-    {CELL_HOME_X,   0,            CELL_HOME_Z, 0},
-    {CELL_CRADLE_X, 0,            CELL_GRIP_Z, 0},
-    {0,             CELL_BIN_Y,   CELL_DROP_Z, 0},   // bin A, +90°, red
-    {0,            -CELL_BIN_Y,   CELL_DROP_Z, 0},   // bin B, −90°, blue
-  };
-  for (uint8_t i = 0; i < POSE_COUNT; i++) poses[i] = d[i];
-}
 
 // ── straight lines = IK waypoints computed on the fly (no array: RAM is only 2 KB) ──
 // ponytail: each 10 mm segment is its own trapezoid (tiny slow-down at each waypoint);
@@ -30,14 +18,7 @@ static pose_t lerp_pose(uint8_t k) {
   return p;
 }
 
-bool poses_load(void)                     { return storage_load(EE_ADDR_POSES, EE_MAGIC_POSES, poses, sizeof poses); }
-void pose_save(pose_id_t id, const pose_t *p) {
-  poses[id] = *p;
-  storage_save(EE_ADDR_POSES, EE_MAGIC_POSES, poses, sizeof poses);
-}
-pose_t pose_get(pose_id_t id) { return poses[id]; }
-
-void motion_init(void) { wp_n = wp_i = 0; servos_ok = joints_init(); poses_defaults(); poses_load(); }
+void motion_init(void) { wp_n = wp_i = 0; servos_ok = joints_init(); }
 bool motion_servos_ok(void) { return servos_ok; }
 
 void motion_where(pose_t *out) { angles_t a; joints_get(&a); fk_solve(&a, out); }

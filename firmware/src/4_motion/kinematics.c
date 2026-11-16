@@ -9,10 +9,16 @@
 #define DEG(r) ((r) * (180.0f / PI_F))
 #define RAD(d) ((d) * (PI_F / 180.0f))
 
-ik_result_t ik_solve(const pose_t *p, angles_t *q) {
+float ik_cos3(const pose_t *p) {                      // cos(J3), law of cosines; |c| > 1 = out of reach
   float r  = sqrtf(p->x * p->x + p->y * p->y);       // horizontal reach
   float zw = p->z + L3 - H_SHOULDER;                  // wrist height above the shoulder
-  float c3 = (r * r + zw * zw - L1 * L1 - L2 * L2) / (2.0f * L1 * L2);
+  return (r * r + zw * zw - L1 * L1 - L2 * L2) / (2.0f * L1 * L2);
+}
+
+ik_result_t ik_solve(const pose_t *p, angles_t *q) {
+  float r  = sqrtf(p->x * p->x + p->y * p->y);
+  float zw = p->z + L3 - H_SHOULDER;
+  float c3 = ik_cos3(p);
   if (c3 < IK_MIN_COS3 || c3 > IK_MAX_COS3) return IK_UNREACHABLE; // stay away from a straight arm
 
   float j3 = acosf(c3);                               // elbow-up solution

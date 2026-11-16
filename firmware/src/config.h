@@ -115,7 +115,7 @@ static const float SERVO_US_PER_UNIT[N_SERVOS] = {SERVO_SPAN_US/DS3218_RANGE_DEG
 #define LINE_DEFAULT_MM_S 50.0f
 #define JOG_MS           300
 #define SAFE_Z           110.0f  // transit height of the tip
-#define PLACE_ABOVE_DZ   20.0f   // extra height above the bins during transit
+#define PLACE_ABOVE_DZ   20.0f   // (pysim sorter only; the firmware uses each station's above_dz)
 #define MOVE_HOME_MS     1500
 #define MOVE_TRANSIT_MS  1600
 #define MOVE_ABOVE_MS    1200
@@ -127,12 +127,24 @@ static const float SERVO_US_PER_UNIT[N_SERVOS] = {SERVO_SPAN_US/DS3218_RANGE_DEG
 #define WIGGLE_MS        150
 
 // ───────────── Workcell (mm, world frame: x → cradle, y left, z up) ─────────────
+// CAD default layout: used on first boot / bad EEPROM and by ST FACTORY (see 4_motion/stations.c).
 #define CELL_HOME_X   160.0f
 #define CELL_HOME_Z   170.0f
 #define CELL_CRADLE_X 220.0f
 #define CELL_GRIP_Z    24.0f
-#define CELL_BIN_Y    220.0f     // bin A at +y (red), bin B at −y (blue)
+#define CELL_BIN_Y    220.0f     // BIN_A at +y (red), BIN_B at −y (blue)
 #define CELL_DROP_Z    78.0f
+#define CELL_BIN_ROLL  90.0f     // bins: fingers tangent to the base (J6 = roll − J1 = 0)
+
+// station table (taught or sent by the sim, validated here, stored in EEPROM)
+#define MAX_STATIONS      8
+#define STATION_NAME_LEN  8      // incl. the final \0 → names up to 7 chars, A-Z 0-9 _
+#define STATION_ABOVE_DZ  60     // default approach height above the grip pose (mm)
+#define Z_MIN_TABLE       10.0f  // keep-out: tip never below this (mm)
+#define R_MIN_BASE        90.0f  // keep-out: base column radius + margin (mm)
+#define MIN_STATION_GAP   80.0f  // pick/bin centres at least this far apart in x,y (mm)  TEAM TO CONFIRM
+#define BIN_MIN_DROP_Z    70.0f  // drop height ≥ bin wall (60 mm) + margin
+#define PREVIEW_MM_S      20.0f  // ST GO: slow line down onto the station
 
 // ───────────── Cycle ─────────────
 #define BOOT_SETTLE_MS   500     // servos reach neutral before homing
@@ -173,13 +185,15 @@ static const float SERVO_US_PER_UNIT[N_SERVOS] = {SERVO_SPAN_US/DS3218_RANGE_DEG
 #define DEC_REF_BLUE_B 0.60f
 
 // ───────────── EEPROM layout (1 KB) ─────────────
-#define EE_ADDR_POSES   0
-#define EE_ADDR_CAL     128
-#define EE_MAGIC_POSES  0xA7A1
-#define EE_MAGIC_CAL    0xC0C1
+// [0..127] = old fixed-pose record (v1, ignored now)
+#define EE_ADDR_CAL       128
+#define EE_ADDR_STATIONS  256    // station table + colour map, ~165 bytes
+#define EE_MAGIC_CAL      0xC0C1
+#define EE_MAGIC_STATIONS 0x57A7
+#define STATIONS_REC_VERSION 1   // bump when station_t changes: old records → CAD defaults
 
 // ───────────── Shared types ─────────────
 typedef struct { float x, y, z, roll; } pose_t;    // gripper tip, mm / deg
 typedef struct { float j[NJ]; } angles_t;          // degrees (grip: mm)
 typedef struct { uint16_t r, g, b, c; } rgbc_t;    // raw colour reading
-typedef enum { COL_EMPTY, COL_RED, COL_BLUE, COL_UNKNOWN } colour_t;
+typedef enum { COL_EMPTY, COL_RED, COL_BLUE, COL_UNKNOWN, N_COLOURS } colour_t;

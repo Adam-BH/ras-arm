@@ -10,11 +10,13 @@
 #define FLASH        PROGMEM
 #define FBYTE(p)     ((char)pgm_read_byte(p))
 #define FFLOAT(p)    pgm_read_float(p)
+#define FMEMCPY(d, s, n) memcpy_P(d, s, n)
 #else
 #define FLASH
 #define PSTR(s)      (s)
 #define FBYTE(p)     (*(const char *)(p))
 #define FFLOAT(p)    (*(p))
+#define FMEMCPY(d, s, n) memcpy(d, s, n)
 #endif
 
 // pointer (in flash) to the i-th item of a string list

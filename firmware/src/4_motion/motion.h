@@ -1,12 +1,9 @@
-// LAYER 4 — MOTION · moves & saved poses
+// LAYER 4 — MOTION · moves
 // "Go to this position" in mm. Uses kinematics to get angles, joints to move.
 #pragma once
 #include "kinematics.h"
 
-typedef enum { POSE_HOME, POSE_CUBE, POSE_BIN_A, POSE_BIN_B, POSE_COUNT } pose_id_t;
-#define POSE_NAMES "HOME\0CUBE\0BIN_A\0BIN_B"   // flash string list, same order
-
-void   motion_init(void);                                   // joints + taught poses
+void   motion_init(void);                                   // joints (stations: see stations.h)
 bool   motion_servos_ok(void);                              // PCA9685 answered at boot
 void   motion_update(uint32_t now);
 
@@ -25,9 +22,3 @@ void   motion_where(pose_t *out);                           // current tip posit
 void   motion_run_toward_switch(uint8_t j, float deg_per_s);
 void   motion_set_homed(uint8_t j);
 float  motion_joint_angle(uint8_t j);
-
-// taught positions (EEPROM with CRC, defaults from the CAD layout)
-pose_t pose_get(pose_id_t id);
-void   pose_save(pose_id_t id, const pose_t *p);
-bool   poses_load(void);                                    // false = bad CRC → CAD defaults kept
-void   poses_defaults(void);
