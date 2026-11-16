@@ -49,7 +49,7 @@ class World:
                          p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW):
                 p.configureDebugVisualizer(flag, 0, physicsClientId=self.cid)
             p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=self.cid)
-            p.resetDebugVisualizerCamera(0.95, 55, -32, [0.08, 0.0, 0.08], physicsClientId=self.cid)
+            p.resetDebugVisualizerCamera(1.35, 50, -24, [0.08, 0.0, 0.17], physicsClientId=self.cid)
 
         # the floor under the bench: neutral grey (PyBullet's stock plane is blue, which the camera would see)
         floor_z = -SIM.plate[4] * MM
@@ -64,7 +64,9 @@ class World:
         urdf_dir = urdf_dir or Path(tempfile.gettempdir()) / "ras_sim"
         urdf = write_arm_urdf(urdf_dir / "ras_arm.urdf")
         self.arm = p.loadURDF(str(urdf), [0, 0, 0], useFixedBase=True,
-                              flags=p.URDF_USE_INERTIA_FROM_FILE, physicsClientId=self.cid)
+                              flags=p.URDF_USE_INERTIA_FROM_FILE | ((p.URDF_USE_SELF_COLLISION
+                              | p.URDF_USE_SELF_COLLISION_EXCLUDE_PARENT) if SIM.self_collision else 0),
+                              physicsClientId=self.cid)
         self.jidx: dict[str, int] = {}
         for i in range(p.getNumJoints(self.arm, physicsClientId=self.cid)):
             self.jidx[p.getJointInfo(self.arm, i, physicsClientId=self.cid)[1].decode()] = i
@@ -77,7 +79,8 @@ class World:
 
         self.offset = [0.0] * 6            # motor position − firmware angle (deg); servos stay 0
         self.power = True
-        self._powered = True               # what drive() last applied
+        self.drivers_enabled = True        # EN low; False while the UNO is in reset (10 k pull-ups, rev F)
+        self._steppers_live = True         # what drive() last applied
         self.broken_switch = [False, False, False]
         self.cubes: dict[int, str] = {}    # body id → "RED" / "BLUE"
         self._slip_next = False
@@ -100,12 +103,18 @@ class World:
     def _build_cell(self):
         px, py, sx, sy, th = SIM.plate
         self._box((sx, sy, th), (px, py, -th / 2), (0.16, 0.18, 0.22, 1))
-        cx = FW.CELL_CRADLE_X
-        wx, wy, wz = SIM.cradle_wall
-        for s in (-1, 1):                                                     # the U cradle
-            self._box((wx, wy, wz), (cx, s * 20, wz / 2), (0.36, 0.40, 0.47, 1))
-        self._box((14, 14, 0.6), (cx, 0, 0.3), (0.61, 0.35, 0.71, 1), collide=False)   # TCS34725, flush
-        self._box((14, 10, 18), (cx, -48, 9), (0.10, 0.10, 0.12, 1))                  # E18 body
+        # the V-cradle (P14): a block the cube sits on, walls that centre it, the TCS34725 in its floor
+        cx, top = FW.CELL_CRADLE_X, SIM.cradle_top
+        grey = (0.36, 0.40, 0.47, 1)
+        if top > 0:
+            self._box((*SIM.cradle_block, top), (cx, 0, top / 2), grey)
+        t, fh = SIM.cradle_fence
+        inner = SIM.cube_size / 2 + SIM.cradle_clear                          # walls this far from the centre
+        for s in (-1, 1):
+            self._box((2 * inner + 2 * t, t, fh), (cx, s * (inner + t / 2), top + fh / 2), grey)
+        self._box((t, 2 * inner, fh), (cx + inner + t / 2, 0, top + fh / 2), grey)   # back stop, far side
+        self._box((14, 14, 0.6), (cx, 0, top + 0.3), (0.61, 0.35, 0.71, 1), collide=False)   # TCS34725, flush
+        self._box((14, 10, 18), (cx, -(inner + t + 7), SIM.ir_beam_z), (0.10, 0.10, 0.12, 1))  # E18 beside it
         B, W, Hb = SIM.bin_size, SIM.bin_wall, SIM.bin_height
         for y, rgba in ((FW.CELL_BIN_Y, (0.62, 0.17, 0.17, 0.9)), (-FW.CELL_BIN_Y, (0.15, 0.25, 0.55, 0.9))):
             self._box((B, W, Hb), (0, y + B / 2, Hb / 2), rgba)
@@ -131,7 +140,7 @@ class World:
     def place_in_cradle(self, colour: str) -> int | None:
         if self.cradle_cube() is not None:
             return None
-        return self.spawn_cube(colour, FW.CELL_CRADLE_X, 0.0)
+        return self.spawn_cube(colour, FW.CELL_CRADLE_X, 0.0, z=SIM.cradle_top + SIM.cube_size / 2 + 0.3)
 
     def remove_cube(self, body: int):
         if body in self.cubes:
@@ -153,13 +162,15 @@ class World:
         h = SIM.cube_size / 2
         if z < -2:
             return "floor"
-        if z > h + 5 and self._touching_fingers(body):
+        on_cradle = abs(x - FW.CELL_CRADLE_X) < SIM.cradle_block[0] / 2 and abs(y) < SIM.cradle_block[1] / 2
+        rest = h + (SIM.cradle_top if on_cradle else 0.0)                     # centre height when resting
+        if z > rest + 5 and self._touching_fingers(body):
             return "gripper"
         inner = SIM.bin_size / 2 - SIM.bin_wall
         for name, by in (("bin_A", FW.CELL_BIN_Y), ("bin_B", -FW.CELL_BIN_Y)):
             if abs(x) < inner and abs(y - by) < inner:   # any height: cubes dropped on one spot stack up
                 return name
-        if z < h + 5 and abs(x - FW.CELL_CRADLE_X) < 12 and abs(y) < 12:
+        if z < SIM.cradle_top + h + 5 and abs(x - FW.CELL_CRADLE_X) < 12 and abs(y) < 12:
             return "cradle"
         return "table"
 
@@ -209,12 +220,15 @@ class World:
         return max(0.0, grip_mm / 2 - SIM.finger_pad) * MM
 
     def drive(self, q_fw):
-        """apply the firmware's joint commands (deg, [6] = grip mm) for the next physics steps"""
-        if self.power and not self._powered:           # rail back: steppers hold wherever the arm sagged to
+        """apply the firmware's joint commands (deg, [6] = grip mm) for the next physics steps.
+        With drivers_enabled False (the UNO in reset: EN pulled up) the steppers are off and the servos keep
+        the last pulses the PCA9685 was given."""
+        live = self.power and self.drivers_enabled
+        if live and not self._steppers_live:           # rail back / EN low again: steppers hold where the arm is
             tq = self.true_q()
             for j in range(FW.N_STEPPERS):
                 self.offset[j] = tq[j] - q_fw[j]
-        self._powered = self.power
+        self._steppers_live = live
         idx = self.arm_idx + self.finger_idx
         if not self.power:                              # per joint: the array call does not honour these forces
             for i, force in zip(idx, list(SIM.unpowered_hold) + [0.5, 0.5]):
@@ -222,6 +236,10 @@ class World:
                                         physicsClientId=self.cid)
             self._servo = None                          # servos re-read their position at power-up
             return
+        if not live:            # drivers disabled: the steppers go limp, the servos keep the last pulses (q_fw frozen)
+            for i, force in zip(self.arm_idx[:3], SIM.unpowered_hold[:3]):
+                p.setJointMotorControl2(self.arm, i, p.VELOCITY_CONTROL, targetVelocity=0, force=force,
+                                        physicsClientId=self.cid)
         if self._servo is None:
             tq = self.true_q()
             self._servo = [tq[3], tq[4], tq[5], self.true_grip()]
@@ -236,9 +254,11 @@ class World:
             targets.append(t * D2R)
         self._update_slip(q_fw[6])
         f = self._finger_target(self._servo[3])
-        p.setJointMotorControlArray(self.arm, idx, p.POSITION_CONTROL, targetPositions=targets + [f, f],
-                                    forces=[SIM.effort[n] for n in ARM_JOINTS] + [SIM.finger_force] * 2,
-                                    positionGains=[0.3] * 8, velocityGains=[1.0] * 8, physicsClientId=self.cid)
+        forces = [SIM.effort[n] for n in ARM_JOINTS] + [SIM.finger_force] * 2
+        first = 0 if live else FW.N_STEPPERS            # steppers off: only the servos are driven
+        p.setJointMotorControlArray(self.arm, idx[first:], p.POSITION_CONTROL, targetPositions=(targets + [f, f])[first:],
+                                    forces=forces[first:], positionGains=[0.3] * (8 - first),
+                                    velocityGains=[1.0] * (8 - first), physicsClientId=self.cid)
 
     def rezero(self, j: int, q_old: float, q_new: float):
         """the firmware overwrote stepper j's step counter (homing): the motor does not move"""
@@ -263,32 +283,36 @@ class World:
         return a <= sw if FW.HOME_DIR[j] < 0 else a >= sw
 
     def ir_raw(self) -> bool:
-        """E18 beam across the cradle pocket (between the U walls): anything in it blocks it"""
-        cx, z, half = FW.CELL_CRADLE_X * MM, SIM.ir_beam_z * MM, 15 * MM
+        """E18 beam across the cradle, between the centring walls: anything in it blocks it"""
+        inner = SIM.cube_size / 2 + SIM.cradle_clear
+        cx, z, half = FW.CELL_CRADLE_X * MM, SIM.ir_beam_z * MM, (inner - 0.5) * MM
         hit = p.rayTest([cx, -half, z], [cx, half, z], physicsClientId=self.cid)[0]
         blocked = hit[0] >= 0
         if self.gui and blocked != self._ir_drawn:              # redraw only on change
             self._ir_drawn = blocked
             colour = [0.2, 0.9, 0.3] if blocked else [0.9, 0.2, 0.2]
             kw = {"replaceItemUniqueId": self._ir_line} if self._ir_line is not None else {}
-            self._ir_line = p.addUserDebugLine([cx, -48 * MM, z], [cx, half, z], colour, 2,
+            start = -(inner + SIM.cradle_fence[0] + 7) * MM
+            self._ir_line = p.addUserDebugLine([cx, start, z], [cx, half, z], colour, 2,
                                                physicsClientId=self.cid, **kw)
         return blocked
 
     def colour_sample(self) -> tuple[int, int, int, int]:
-        """one TCS34725 integration (raw r, g, b, clear): LED light bounced off the cube above the sensor"""
+        """one TCS34725 integration (raw r, g, b, clear): LED light bounced off the cube above the sensor,
+        which sits in the cradle floor"""
         h = SIM.cube_size / 2
         refl, d = (0.0, 0.0, 0.0), 1e9
         for body, colour in self.cubes.items():
             x, y, z, _ = self.cube_pose(body)
-            if abs(x - FW.CELL_CRADLE_X) < h and abs(y) < h and z - h < d:
-                d, refl = max(0.0, z - h), SIM.cube_rgba[colour][:3]
+            gap = z - h - SIM.cradle_top                       # cube bottom above the sensor
+            if abs(x - FW.CELL_CRADLE_X) < h and abs(y) < h and gap < d:
+                d, refl = max(0.0, gap), SIM.cube_rgba[colour][:3]
         f = 1.0 / (1.0 + (d / SIM.colour_falloff_mm) ** 2) if d < 1e8 else 0.0
         rgb = [max(0.0, (a + SIM.colour_led_gain * k * f) * (1 + self.rng.gauss(0, SIM.colour_noise)))
                for a, k in zip(SIM.colour_ambient, refl)]
         return int(rgb[0]), int(rgb[1]), int(rgb[2]), int(sum(rgb))
 
-    # ───────────── faults (the "virtual extras" of the web twin) ─────────────
+    # ───────────── faults ─────────────
     def fail_next_pick(self):
         """the next grasp slips: frictionless pads until the gripper opens again"""
         self._slip_next = True

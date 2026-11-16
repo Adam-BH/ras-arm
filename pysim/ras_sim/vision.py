@@ -1,5 +1,5 @@
 """Overhead camera + OpenCV: find red and blue cubes anywhere on the table (same idea as the ICRA arm's
-vision pipeline and the web twin's vision sort, feature/vision-sort).
+vision pipeline).
 
     frame = camera.capture()                    # synthetic RGB-D from PyBullet (CPU renderer)
     cubes = detect(frame, camera)               # HSV masks → blobs → every pixel unprojected with the depth
@@ -27,7 +27,7 @@ HSV = {"RED": [((0, 110, 50), (8, 255, 255)), ((172, 110, 50), (180, 255, 255))]
        "BLUE": [((100, 110, 50), (128, 255, 255))]}
 MIN_PX = 40
 TOP_BAND_MM = 3.0
-SIDE_MM = (18.0, 32.0)          # a 25 mm cube's top face, seen through the renderer
+SIDE_MM = (0.7 * SIM.cube_size, 1.3 * SIM.cube_size)   # a cube's top face, seen through the renderer
 ZONE = {"x": (120.0, 290.0), "y": (-160.0, 160.0)}       # loose cubes are looked for here
 
 

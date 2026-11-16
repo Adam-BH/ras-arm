@@ -73,7 +73,7 @@ def test_two_slips_then_pick_failed(sim):
 
 def test_small_step_loss_is_caught_by_rehoming(sim):
     sim.send("SET rehome_every 1")
-    sim.world.lose_steps(0, 1.5)                    # J1 skipped 1.5°: 6 mm off at the cradle, still grasps
+    sim.world.lose_steps(0, 0.8)                    # J1 skipped 0.8°: 3 mm off at the cradle, still grasps
     b = cycle(sim, "RED", 60000)
     assert sim.world.where(b) == "bin_A"
     assert sim.run_until(lambda: sim.fw.state == "IDLE" and sim.fw.homed, 40000)

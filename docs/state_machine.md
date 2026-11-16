@@ -1,6 +1,6 @@
 # State machine (`firmware/src/6_app/fsm.c`)
 
-11 states, one `switch(state)` per loop, never blocks. Mirrored by `sim/src/core/virtualFirmware.ts`.
+11 states, one `switch(state)` per loop, never blocks. Mirrored by `pysim/ras_sim/firmware.py`.
 
 ```mermaid
 stateDiagram-v2

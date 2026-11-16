@@ -37,9 +37,9 @@ DDA ISR, servo ramps go to the PCA9685 → `hal_step_pulse()` toggles PORTD.
   waits are inside the HAL (2 µs step pulse; EEPROM byte writes during `SAVE`/`CAL`, which kick the watchdog).
 - **Watchdog 250 ms**, kicked once per `loop()`.
 - **E-stop is checked first**, every loop, from any state.
-- **All numbers in `config.h`**, including decision defaults. The sim mirrors them in `sim/src/core/config.ts`.
+- **All numbers in `config.h`**, including decision defaults. pysim reads `config.h` directly (`pysim/ras_sim/config.py`).
 - **RAM**: strings live in flash (`flash.h`, avr-libc `PROGMEM`, plain C); no `malloc`, no `String`,
-  no `printf("%f")` (the console formats numbers itself). Build report: RAM 67.3 %, flash 86 %.
+  no `printf("%f")` (the console formats numbers itself). Build report: RAM 67.5 %, flash 85.6 %.
 
 ## Stepper motion
 One Timer1 interrupt at 20 kHz drives all three steppers with a Bresenham DDA: the axis with the most

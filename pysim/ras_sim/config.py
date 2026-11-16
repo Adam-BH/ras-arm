@@ -99,7 +99,7 @@ class _Namespace:
         return f"<config.h: {len(self.__dict__)} values>"
 
 
-FW = _Namespace(parse_config_h())
+FW = _Namespace(parse_config_h())     # config.h holds the design book's values (adopted design, rev F)
 
 
 @dataclass(frozen=True)
@@ -121,49 +121,94 @@ CELL = {
 
 @dataclass
 class SimParams:
-    """Simulation only: nothing here exists in the firmware. mm, deg, ms, kg, N unless the name says."""
+    """Simulation only: nothing here exists in the firmware. mm, deg, ms, kg, N unless the name says.
+    From the design book (RAS_Arm_Design_Book.pdf): Table 3 masses, Fig. 4 layout, Sec. 2.4 sections."""
     dt_ms: float = 1.0                     # physics step (1 kHz, small cubes need it)
     tick_ms: int = 5                       # firmware loop period (5 physics steps)
     solver_iterations: int = 60            # 30…150 give the same results in the tests; 60 keeps a margin
 
-    # the cube and the cell (same sizes as the web twin and the Gazebo cell)
-    cube_size: float = 25.0
-    cube_mass: float = 0.012               # 25 mm PLA cube, ~20 % infill
-    cube_friction: float = 0.9
+    # the object and the cell
+    cube_size: float = 35.0                # design object: 35 mm PLA cube (Sec. 1.3)
+    cube_mass: float = 0.021               # 21 g
+    cube_friction: float = 0.5             # × finger pads 0.8 = µ 0.4, PLA on PLA (Sec. 3.2.1)
     cube_rgba: dict = field(default_factory=lambda: {"RED": (0.85, 0.13, 0.12, 1), "BLUE": (0.12, 0.32, 0.86, 1)})
-    plate: tuple = (60.0, 0.0, 560.0, 640.0, 10.0)        # centre x, y and size x, y, thickness
-    cradle_wall: tuple = (40.0, 8.0, 16.0)                # x, y, z of each U wall, centred at y = ±20
-    bin_size: float = 110.0
+    plate: tuple = (60.0, 0.0, 560.0, 640.0, 10.0)        # baseplate: centre x, y and size x, y, thickness
+    cradle_top: float = 20.0               # the cube sits on the V-cradle (P14), 20 mm above the table
+    cradle_block: tuple = (70.0, 70.0)     # x, y
+    cradle_fence: tuple = (4.0, 8.0)       # thickness, height of the walls that centre the cube
+    cradle_clear: float = 2.0              # free play around the cube in the cradle, per side
+    bin_size: float = 110.0                # ≥ twice the object (Sec. 2.6)
     bin_wall: float = 4.0
     bin_height: float = 60.0
 
-    # the arm (masses and torques: ros2/ras_arm_description/config/hardware.yaml on feature/ros2-twin)
-    mass: dict = field(default_factory=lambda: {"base_link": 1.5, "turret": 1.1, "upper_arm": 0.25, "forearm": 0.12,
-                                                "forearm_roll": 0.15, "wrist": 0.09, "tool": 0.12, "finger": 0.01})
-    effort: dict = field(default_factory=lambda: {"J1": 0.40, "J2": 6.2, "J3": 2.0, "J4": 2.1, "J5": 2.1, "J6": 1.08})
-    finger_force: float = 12.0             # N per finger: MG996R through the linkage, stalls on the cube
-    finger_len: float = 44.0
-    finger_beyond: float = 7.0             # fingertips reach this far below the firmware's tip
-    finger_pad: float = 1.0                # pads sit 1 mm inside the servo's nominal opening, so
-                                           # GRIP_CLOSED_MM (26) presses the 25 mm cube like the real
-                                           # servo stalling on it (the Gazebo twin squeezes the same way)
-    finger_friction: float = 1.2
+    # the arm: layout from Fig. 4, sections from Sec. 2.4
+    base_housing: tuple = (140.0, 140.0, 45.0)            # P01: J1 motor underneath
+    turntable: tuple = (130.0, 6.0)                       # P02: diameter, thickness (4 × 608ZZ)
+    upper_arm_section: tuple = (42.0, 32.0)               # P06: 32 × 42 box (42 in the bending plane)
+    forearm_section: tuple = (34.0, 26.0)                 # P07 / P09: 26 × 34 box
+    boss_d: float = 48.0                                  # joint bosses around the 608ZZ
+    d4: float = 140.0                                     # elbow → J4 forearm roll
+    gripper_len: float = 100.0                            # J6 → fingertip (so J5 → J6 = L3 − 100)
+    pulley_d: tuple = (56.0, 66.0)                        # P04 shoulder 88T, P05 elbow 104T
+    j2_motor_offset: tuple = (-40.0, 47.0)                # J2 motor on the tower top: 62 mm from the shoulder
+    # masses (Table 3): ρ1 0.743 kg/m, ρ2 0.546 kg/m, elbow 97 g, DS3218MG 60 g, gripper + 2 MG996R 180 g
+    rho_upper: float = 0.743
+    rho_fore: float = 0.546
+    m_elbow: float = 0.097
+    m_ds3218: float = 0.060
+    m_mg996r: float = 0.055
+    m_gripper: float = 0.180               # gripper + J6 and gripper MG996R
+    m_turret: float = 1.30                 # turntable, tower, J2 motor + PG518, J3 motor
+    m_base: float = 1.5
+    finger_mass: float = 0.010
+    finger_force: float = 15.0             # N per finger: 1.84 N needed (Sec. 3.2.1), MG996R stalls on the cube
+    finger_len: float = 50.0
+    finger_beyond: float = 0.0             # the firmware's tip IS the fingertip (T = wrist pitch → fingertip)
+    finger_pad: float = 0.0                # mm the pads sit inside the servo's nominal opening
+    finger_friction: float = 0.8           # V-groove pads
     hard_stop_margin: float = 3.0          # deg past each homing switch before the mechanical stop
+    self_collision: bool = True            # links (except a joint's two sides) collide: a limp arm lands on itself
     servo_dps: float = 400.0               # DS3218 / MG996R no-load speed (the firmware ramps slower)
     grip_mm_s: float = 150.0               # finger opening speed of the gripper servo + linkage
-    # E-stop cuts the motor rail: what still holds each joint (detent / gearbox friction, N·m)
-    unpowered_hold: tuple = (0.02, 0.35, 0.12, 0.05, 0.05, 0.03)
+    stepper_rated: float = 0.49            # 17HS4401 holding torque, N·m (Table 5)
+    stepper_detent: float = 0.02           # unpowered detent torque, N·m at the motor
+    servo_rated: tuple = (1.96, 1.96, 1.08)                # J4, J5 DS3218MG; J6 MG996R (Table 5)
 
     # sensors
-    ir_beam_z: float = 12.5                # E18 beam across the cradle pocket, mm above the table
+    ir_beam_z: float = 30.0                # E18 beside the cradle, horizontal, at the cube's lower half
     colour_ambient: tuple = (60.0, 65.0, 70.0)            # RGB counts with nothing on the sensor
     colour_led_gain: float = 700.0         # counts for a white surface touching the sensor
     colour_falloff_mm: float = 8.0         # reflected light ∝ 1 / (1 + (d / falloff)²)
     colour_noise: float = 0.02             # 2 % per channel and sample
 
-    # overhead camera (same placement as the web twin's vision camera, feature/vision-sort)
+    # overhead camera: 500 mm above the pick zone, ≈ 1 px/mm
     camera: dict = field(default_factory=lambda: {"x": 205.0, "y": 0.0, "z": 500.0, "fov_deg": 33.4,
                                                   "width": 400, "height": 300})
+
+    # ── derived from the transmissions in config.h ──
+    def ratio(self, j: int) -> float:
+        """stepper joint j: motor turns per joint turn, from the steps per degree"""
+        spd, micro = (FW.SPD_J1, FW.SPD_J2, FW.SPD_J3)[j], (16, 8, 8)[j]
+        return spd * 360.0 / (200.0 * micro)
+
+    @property
+    def effort(self) -> dict:
+        """rated torque at each joint, N·m (Table 5): stepper × ratio × efficiency (0.9 planetary, 0.95 belt)"""
+        eff = (1.0, 0.9 * 0.95, 0.95)
+        out = {f"J{j + 1}": self.stepper_rated * self.ratio(j) * eff[j] for j in range(3)}
+        out.update({f"J{j + 4}": t for j, t in enumerate(self.servo_rated)})
+        return out
+
+    @property
+    def unpowered_hold(self) -> tuple:
+        """what still holds each joint with the motor rail cut: detent × ratio + friction (N·m)"""
+        steppers = tuple(self.stepper_detent * self.ratio(j) + f for j, f in enumerate((0.0, 0.05, 0.02)))
+        return steppers + (0.05, 0.05, 0.03)
+
+    @property
+    def d6(self) -> float:
+        """J5 wrist pitch → J6 wrist roll along the tool"""
+        return FW.L3 - self.gripper_len
 
 
 SIM = SimParams()

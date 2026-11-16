@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .app import CommandError, Simulation, cmd, wait
-from .config import FW
+from .config import FW, Pose
+from .kinematics import ik
 from .protocol import fmt
 
 
@@ -47,7 +48,8 @@ DEMO = [   # a pick from the cradle into bin A, then a wave, by hand
     Slide(pose=(C, 0, FW.CELL_GRIP_Z, 0), duration=1.6, label="down to the cube"),
     Slide(pose=(C, 0, FW.CELL_GRIP_Z, 0), gripper="close", duration=0.3, label="grasp", pause_after=0.3),
     Slide(pose=(C, 0, FW.SAFE_Z, 0), duration=1.4, label="lift"),
-    Slide(joints=[90, 25, 85, 0, 70, -90], duration=2.0, label="swing over bin A (joint move)"),
+    Slide(joints=ik(Pose(0, FW.CELL_BIN_Y, FW.SAFE_Z + FW.PLACE_ABOVE_DZ, 0))[1], duration=2.0,
+          label="swing over bin A (joint move)"),
     Slide(pose=(0, FW.CELL_BIN_Y, FW.CELL_DROP_Z, 0), duration=1.2, label="lower into bin A"),
     Slide(pose=(0, FW.CELL_BIN_Y, FW.CELL_DROP_Z, 0), gripper="open", duration=0.3, label="release", pause_after=0.4),
     Slide(joints=[45, 10, 60, 0, 30, 0], duration=1.8, label="wave: up"),

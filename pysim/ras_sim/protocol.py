@@ -1,4 +1,4 @@
-"""The serial protocol (docs/serial_protocol.md), same as sim/src/link/protocol.ts."""
+"""The serial protocol (docs/serial_protocol.md): what firmware/src/6_app/console.c sends and accepts."""
 from __future__ import annotations
 
 import re

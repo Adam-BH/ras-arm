@@ -2,7 +2,7 @@
 
 All tunable logic lives in **`firmware/src/5_tasks/decisions.c`** (pure C, unit-tested). Defaults are in
 `config.h`; most can be changed at runtime with `SET <key> <value>` in IDLE or TEACH (not saved:
-put the final value in `config.h`). The twin (`virtualFirmware.ts`) implements the same rules.
+put the final value in `config.h`). The Python twin (`pysim/ras_sim/firmware.py`) implements the same rules.
 
 | # | Rule | Parameter (`SET` key) | Default |
 |---|---|---|---|

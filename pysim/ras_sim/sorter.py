@@ -2,7 +2,7 @@
 drop it in its colour's bin → repeat until the camera sees no reachable cube.
 
 Only the normal protocol (STATUS, MOVE, GRIP): no firmware change, and the same loop would drive the real
-arm with a calibrated webcam. Same design as sim/src/vision/sorter.ts on feature/vision-sort.
+arm with a calibrated webcam.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass, field
 
 from .app import CommandError, Simulation, cmd, wait
-from .config import FW, Pose
+from .config import FW, SIM, Pose
 from .kinematics import OK, ik
 from .protocol import fmt
 from .vision import Detection, OverheadCamera, detect
@@ -57,7 +57,12 @@ def vision_sort(sim: Simulation, cam: OverheadCamera, report: SortReport | None 
     st = sim.send("STATUS")
     if not st.text.startswith("IDLE ") or "homed=1" not in st.text or "running=1" in st.text:
         raise CommandError(f"the arm must be IDLE, homed and not running ({st.text})")
-    grip_z = sim.fw.poses["CUBE"].z                   # the taught grip height
+    # grip height = the cube's centre + where the taught CUBE pose holds a cube relative to its centre
+    # (0 in the design book: fingertips at the centre). The camera measures each cube's top.
+    offset = sim.fw.poses["CUBE"].z - (SIM.cradle_top + SIM.cube_size / 2)
+
+    def grip_z(d: Detection) -> float:
+        return d.z_top - SIM.cube_size / 2 + offset
     skip: list[Detection] = []
 
     def look():
@@ -70,15 +75,15 @@ def vision_sort(sim: Simulation, cam: OverheadCamera, report: SortReport | None 
             on_look(rep)
         return [d for d in rep.seen if d.ok]
 
-    def pick(d: Detection, roll: float):
+    def pick(d: Detection, roll: float, gz: float):
         for attempt in range(1 + RETRIES):
             dx, dy, dr = JIGGLE[attempt]
             x, y, r = d.x + dx, d.y + dy, roll + dr
             rep.text = f"pick {d.colour} at {d.x:.0f}, {d.y:.0f} (try {attempt + 1})"
             yield from cmd(sim, fmt.grip(FW.GRIP_OPEN_MM))
             yield from cmd(sim, fmt.move(x, y, FW.SAFE_Z, r, MS["above"]))
-            yield from cmd(sim, fmt.move(x, y, grip_z + 30, r, MS["descend"]))   # two short joint moves:
-            yield from cmd(sim, fmt.move(x, y, grip_z, r, MS["descend"]))        # the tip stays near vertical
+            yield from cmd(sim, fmt.move(x, y, gz + 30, r, MS["descend"]))       # two short joint moves:
+            yield from cmd(sim, fmt.move(x, y, gz, r, MS["descend"]))            # the tip stays near vertical
             yield from cmd(sim, fmt.grip(FW.GRIP_CLOSED_MM))
             yield from wait(sim, 150)
             yield from cmd(sim, fmt.move(x, y, FW.SAFE_Z, r, MS["above"]))
@@ -106,7 +111,7 @@ def vision_sort(sim: Simulation, cam: OverheadCamera, report: SortReport | None 
         cubes = yield from look()
         cubes = [d for d in cubes if not any(s.colour == d.colour and math.hypot(s.x - d.x, s.y - d.y) < VERIFY_MM
                                              for s in skip)]
-        todo = [(d, grasp_roll(d.x, d.y, d.yaw, grip_z)) for d in cubes]
+        todo = [(d, grasp_roll(d.x, d.y, d.yaw, grip_z(d))) for d in cubes]
         rep.out_of_reach = sum(1 for _, r in todo if r is None)
         todo = sorted(((d, r) for d, r in todo if r is not None), key=lambda t: math.hypot(t[0].x, t[0].y))
         if not todo:
@@ -114,7 +119,7 @@ def vision_sort(sim: Simulation, cam: OverheadCamera, report: SortReport | None 
             rep.text = "table clear" + (f" ({rep.out_of_reach} out of reach)" if rep.out_of_reach else "")
             return rep
         d, roll = todo[0]
-        if (yield from pick(d, roll)):
+        if (yield from pick(d, roll, grip_z(d))):
             yield from place(d.colour)
             rep.sorted += 1
             rep.bins["A" if d.colour == "RED" else "B"] += 1
@@ -139,9 +144,9 @@ def scatter(sim: Simulation, n: int, seed: int | None = None, colours=("RED", "B
     while len(placed) < n and tries < 5000:
         tries += 1
         x, y, yaw = rng.uniform(135, 275), rng.uniform(-145, 145), rng.uniform(-45, 45)
-        if math.hypot(x - FW.CELL_CRADLE_X, y) < 55 or any(math.hypot(x - a, y - b) < 60 for a, b in placed):
+        if math.hypot(x - FW.CELL_CRADLE_X, y) < SIM.cradle_block[0] / 2 + SIM.cube_size + 5 or                 any(math.hypot(x - a, y - b) < max(60, 2 * SIM.cube_size + 5) for a, b in placed):
             continue
-        if grasp_roll(x, y, yaw, FW.CELL_GRIP_Z) is None:
+        if grasp_roll(x, y, yaw, FW.CELL_GRIP_Z - SIM.cradle_top) is None:      # a cube on the table
             continue
         placed.append((x, y))
         sim.world.spawn_cube(rng.choice(colours), x, y, yaw)

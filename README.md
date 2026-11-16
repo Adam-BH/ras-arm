@@ -4,9 +4,9 @@ A 6-axis arm that picks red and blue cubes from a fixed cradle and sorts them in
 Arduino UNO + CNC Shield V3 drive 3 steppers (TMC2209) and 4 servos (PCA9685); a TCS34725 reads the
 colour, an E18 IR beam sees the cube arrive, NC limit switches home the arm, a latching E-stop cuts motor power.
 
-This repo holds the **firmware** (C, PlatformIO, 6 strict layers, 23 PC tests) and a **React app**
-(3D digital twin + move-to + teach mode over USB, plus a virtual mode that runs the whole firmware
-logic in the browser without a board).
+This repo holds the **firmware** (C, PlatformIO, 6 strict layers, 24 PC tests) and **pysim**, a physics
+simulation of the whole cell (PyBullet): the design book's arm, a Python twin of the firmware, and the
+board's serial port, so any serial tool can drive the simulated arm as if it were the UNO.
 
 > 📷 *Photo of the arm: placeholder* · 🗺️ *Workcell diagram: placeholder*
 
@@ -44,7 +44,7 @@ Calls only go down, one layer at a time; all numbers live in `config.h`. Details
 | J2 STEP/DIR | D3/D6 | | E-stop sense | A0 |
 | J3 STEP/DIR | D4/D7 | | E18 IR | A3 |
 | Drivers EN | D8 (LOW = on) | | I²C (PCA9685 0x40, TCS34725 0x29) | A4/A5 |
-| Status LED | D13 | | Servos J4/J5/J6/grip | PCA9685 ch 0/1/2/3 |
+| Status LED | D13 | | Servos J4/J5/J6/grip | PCA9685 ch 3/0/1/2 (rev F) |
 
 Full table, power and LED codes: [docs/wiring_pinout.md](docs/wiring_pinout.md).
 
@@ -61,31 +61,16 @@ Full spec: [docs/serial_protocol.md](docs/serial_protocol.md).
 Needs [PlatformIO](https://platformio.org/install/cli) (`pipx install platformio`).
 ```bash
 cd firmware
-pio run -e uno                 # build (prints RAM / flash: 67.3 % / 86 %)
+pio run -e uno                 # build (prints RAM / flash: 67.5 % / 85.6 %)
 pio run -e uno -t upload       # flash the UNO
 pio device monitor             # talk to it: PING, STATUS, TEACH, JOG 0 0 -5, SAVE CUBE, RUN …
-pio test -e native             # 23 tests on your PC against a fake robot
+pio test -e native             # 24 tests on your PC against a fake robot
 ```
 Shield clone with Z− on D12? Add `-DLIMIT_Z_ON_D12` to `build_flags` in `platformio.ini`.
 
-## App: digital twin + teach (sim/)
-```bash
-cd sim
-npm i
-npm run dev                    # http://localhost:5173
-npm test                       # Vitest: protocol, golden IK vectors, virtual cycle/teach
-npm run build                  # static site in sim/dist (GitHub Pages ready)
-```
-- **Virtual** mode: no board needed. The TypeScript twin of the firmware runs the same protocol and
-  state machine. Place a red/blue cube, make the next pick fail, press the E-stop, cut a switch wire.
-- **USB** mode: **Chrome or Edge** (Web Serial). Connect → pick the Arduino.
-- Panels: 3D workcell to scale · Move-to (MOVE/LINE checked with the TS IK, MOVEJ/GRIP sliders) ·
-  Teach (jog pad, per-joint jog, save/go poses, colour calibration) · Run (HOME/RUN/STOP/RESET, live
-  state diagram, cycle counter) · Telemetry plots (20 s) · Serial console.
-
 ## Teach mode in 30 seconds
-Enter TEACH → jog the open gripper around a cube in the cradle → **Save CUBE** → same for BIN_A,
-BIN_B, HOME → CAL RED / CAL BLUE / CAL EMPTY with the cube on the sensor → Leave TEACH → RUN.
+`TEACH` → `JOG` the open gripper around a cube in the cradle → `SAVE CUBE` → same for `BIN_A`,
+`BIN_B`, `HOME` → `CAL RED` / `CAL BLUE` / `CAL EMPTY` with the cube on the sensor → `DONE` → `RUN`.
 Walkthrough and bench test checklist: [docs/teach_mode.md](docs/teach_mode.md).
 
 ## Folder map
@@ -94,16 +79,11 @@ firmware/            PlatformIO project (env uno, env native)
   src/config.h       every number: pins, geometry, limits, speeds, timings, decision defaults
   src/1_hal … 6_app  the six layers
   test/test_arm/     fake robot (hal_fake.c) + Unity tests + generated IK vectors
-pysim/               PyBullet physics sim: URDF from config.h, Python firmware twin, vision sort, keyframes,
-                     GUI + console, pytest (CI job pysim)
-sim/                 Vite + React 18 + TypeScript + react-three-fiber + zustand
-  src/link/          ArmLink interface, SerialLink (Web Serial), VirtualLink, protocol.ts
-  src/core/          kinematics.ts (port of the C IK), virtualFirmware.ts (FSM + motion twin)
-  src/scene/         3D workcell, arm, cube, sensors
-  src/panels/        UI panels
+pysim/               PyBullet physics sim: the design book's arm from config.h, Python firmware twin, serial
+                     port like the UNO, vision sort, keyframes, GUI + console, pytest (CI job pysim)
 docs/                architecture, state machine, kinematics, wiring, protocol, teach mode, decisions
 tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/L2 torque sweep)
-.github/workflows/   CI: build uno, native tests, sim tests + build
+.github/workflows/   CI: golden IK vectors, build uno, native tests, pysim tests + headless demo
 ```
 
 ## Kinematics, decisions
@@ -111,19 +91,22 @@ tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/
 - Every decision rule (colour, 2-colour trick, jiggle, wiggle, pick-OK, re-home) and its parameter: [docs/decisions.md](docs/decisions.md)
 
 ## Physics simulation (pysim/)
-The cell in PyBullet: the arm generated from `config.h`, real cubes with mass and friction, steppers that
-can lose steps, servos, NC switches, the IR beam, a TCS34725 model, an E-stop that makes the arm go limp, and
-a Python twin of the firmware (same states, decisions and protocol) driving it. Grasps, slips and drops are
-physics, not script. On top, over the normal protocol: the RUN cycle with a cradle feeder, a vision sort
-(overhead camera → OpenCV HSV → depth unprojection → pick anywhere on the table), and an ICRA-style keyframe player.
+The cell in PyBullet: the design book's arm generated from `config.h` (tower, belts, servos, gripper, Table 3
+masses), a 35 mm cube on the V-cradle, steppers that can lose steps, servos, NC switches, the IR beam, a
+TCS34725 model, an E-stop that makes the arm go limp, and a Python twin of the firmware (same states,
+decisions and protocol) driving it. Grasps, slips and drops are physics, not script. The twin is reachable on
+a serial port with the UNO's exact framing and auto-reset (`--serial tcp:5005`, or a COM port with com0com).
+On top, over the normal protocol: the RUN cycle with a cradle feeder, a vision sort (overhead camera → OpenCV
+HSV → depth unprojection → pick anywhere on the table), and an ICRA-style keyframe player.
 ```bash
 cd pysim && pip install -r requirements.txt
 python run_sim.py                      # window with buttons + protocol console (!help)
 python run_sim.py demo --headless      # RUN cycle, vision sort, keyframes; exit 1 if a cube ends up wrong
-pytest tests                           # 21 tests: model vs firmware, the cycle and its faults, vision
+python run_sim.py --serial tcp:5005    # + the board's serial port: pio device monitor --port socket://localhost:5005
+pytest tests                           # 31 tests: model vs firmware and design book, faults, serial port, vision
 ```
 Details, the sensor models and what the physics found: [pysim/README.md](pysim/README.md).
 
-<img src="docs/img/pysim-workcell.png" width="620" alt="PyBullet workcell: the arm lifting a blue cube out of the cradle">
+<img src="pysim/img/workcell.png" width="620" alt="PyBullet workcell: the design book's arm lifting a blue cube off the V-cradle">
 
 MIT licence.

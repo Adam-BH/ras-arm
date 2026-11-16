@@ -29,7 +29,7 @@ uint16_t joint_deg_to_us(uint8_t j, float deg) {            // linear calibratio
 }
 
 static void servos_write_all(void) {
-  for (uint8_t s = 0; s < N_SERVOS; s++) servo_write_us(SERVO_CH_J4 + s, joint_deg_to_us(N_STEPPERS + s, srv_now[s]));
+  for (uint8_t s = 0; s < N_SERVOS; s++) servo_write_us(SERVO_CH[s], joint_deg_to_us(N_STEPPERS + s, srv_now[s]));
 }
 
 bool joints_init(void) {

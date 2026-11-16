@@ -3,7 +3,7 @@
 
 Writes the SAME vectors to:
   firmware/test/test_arm/ik_vectors.h        (C IK must match within 0.1 mm / 0.05°)
-  sim/src/core/__tests__/ik_vectors.json     (TS IK must match within 0.1 mm / 0.05°)
+  pysim/tests/ik_vectors.json                (Python IK must match within 0.1 mm / 0.05°)
 so firmware and simulator are proven to compute the same angles.
 
 Conventions (docs/kinematics.md): x forward (cradle), y left, z up, origin = base axis at table.
@@ -13,7 +13,7 @@ Run from the repo root:  python3 tools/ik_reference.py
 """
 import json, math, os
 
-L1, L2, L3, H = 180.0, 140.0, 110.0, 120.0
+L1, L2, L3, H = 165.0, 190.0, 200.0, 300.0     # firmware/src/config.h (design book, adopted design)
 COS3_MAX, COS3_MIN = 0.995, -1.0
 JMIN = [-100, -20, 20, -90, -100, -90]
 JMAX = [100, 110, 150, 90, 100, 90]
@@ -51,11 +51,11 @@ def fk(q):
 
 def vectors():
     out = []
-    stations = [(160, 0, 170, 0), (220, 0, 24, 0), (0, 220, 78, 0), (0, -220, 78, 0),
+    stations = [(160, 0, 170, 0), (220, 0, 37.5, 0), (0, 220, 88, 0), (0, -220, 88, 0),
                 (220, 0, 110, 0), (0, 220, 130, 0), (0, -220, 130, 0)]
     grid = [(r * math.cos(math.radians(a)), r * math.sin(math.radians(a)), z, roll)
             for r in range(60, 380, 40) for a in (-95, -60, -20, 0, 35, 90)
-            for z in (-40, 0, 24, 78, 130, 200, 260) for roll in (0, 15)]
+            for z in (-40, 0, 37.5, 88, 130, 200, 260) for roll in (0, 15)]
     for x, y, z, roll in stations + grid:
         st, q, border = ik(x, y, z, roll)
         if border:
@@ -69,7 +69,7 @@ def vectors():
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     v = vectors()
-    js = os.path.join(root, "sim/src/core/__tests__/ik_vectors.json")
+    js = os.path.join(root, "pysim/tests/ik_vectors.json")
     os.makedirs(os.path.dirname(js), exist_ok=True)
     with open(js, "w") as f:
         json.dump(v, f, indent=0)
@@ -81,7 +81,7 @@ def main():
         for e in v:
             f.write("  {" + ", ".join(f"{n:.5f}f" for n in e["pose"] + [e["status"]] + e["joints"]) + "},\n")
         f.write("};\n#define IK_N_VECTORS (sizeof IK_VECTORS / sizeof IK_VECTORS[0])\n")
-    print(f"{len(v)} vectors ({sum(e['status'] == OK for e in v)} ok) → {h}, {js}")
+    print(f"{len(v)} vectors ({sum(e['status'] == OK for e in v)} ok) -> {h}, {js}")
 
 
 if __name__ == "__main__":
