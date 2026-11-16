@@ -2,7 +2,7 @@
 drop it in its colour's bin → repeat until the camera sees no reachable cube.
 
 Only the normal protocol (STATUS, MOVE, GRIP): no firmware change, and the same loop would drive the real
-arm with a calibrated webcam. Same design as sim/src/vision/sorter.ts on feature/vision-sort.
+arm with a calibrated webcam.
 """
 from __future__ import annotations
 

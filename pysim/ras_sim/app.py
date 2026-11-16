@@ -2,7 +2,7 @@
 
 Every 5 ms: the firmware twin runs one loop, its joint commands go to the motors, physics advances
 5 × 1 ms, and each host script gets one turn. Host scripts are generators that talk to the firmware
-only through the serial protocol (send a line, wait for its OK / DONE), exactly like the web app or a
+only through the serial protocol (send a line, wait for its OK / DONE), exactly like a serial monitor or a
 Python script on the real USB port would.
 
     sim = Simulation()
@@ -24,7 +24,7 @@ from .protocol import Reply, Telemetry, classify, command_name, parse_reply, par
 from .world import World
 
 MOTION_COMMANDS = {"HOME", "MOVE", "LINE", "MOVEJ", "JOG", "JOGJ", "GRIP", "GO", "CAL"}
-BOOTLOADER_MS = 1600          # UNO reset → optiboot waits for an upload → the sketch starts (web app: "~2 s")
+BOOTLOADER_MS = 1600          # UNO reset → optiboot waits for an upload → the sketch starts (≈ 2 s on the bench)
 Script = Generator[None, None, object]
 
 

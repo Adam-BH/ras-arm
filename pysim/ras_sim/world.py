@@ -312,7 +312,7 @@ class World:
                for a, k in zip(SIM.colour_ambient, refl)]
         return int(rgb[0]), int(rgb[1]), int(rgb[2]), int(sum(rgb))
 
-    # ───────────── faults (the "virtual extras" of the web twin) ─────────────
+    # ───────────── faults ─────────────
     def fail_next_pick(self):
         """the next grasp slips: frictionless pads until the gripper opens again"""
         self._slip_next = True

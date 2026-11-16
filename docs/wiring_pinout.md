@@ -22,10 +22,12 @@ Every pin below is defined once in `firmware/src/config.h`.
 ## PCA9685 channels (50 Hz)
 | Ch | Joint | Servo |
 |---|---|---|
-| 0 | J4 forearm roll | DS3218MG |
-| 1 | J5 wrist pitch | DS3218MG |
-| 2 | J6 wrist roll | MG996 |
-| 3 | Gripper | MG996 |
+| 0 | J5 wrist pitch | DS3218MG |
+| 1 | J6 wrist roll | MG996 |
+| 2 | Gripper | MG996 |
+| 3 | J4 forearm roll (added in rev F) | DS3218MG |
+
+`SERVO_CH[]` in `config.h` maps each servo joint to its channel.
 
 ⚠ DS3218MG comes in **180° and 270°** versions. Set `DS3218_RANGE_DEG` in `config.h` to match the label.
 Trim each servo with `SERVO_CENTER_US` / `SERVO_US_PER_UNIT` (sign = direction).
@@ -34,8 +36,8 @@ Trim each servo with `SERVO_CENTER_US` / `SERVO_US_PER_UNIT` (sign = direction).
 | Joint | Motor | Drive | Microstep (shield jumpers) | Steps / joint ° |
 |---|---|---|---|---|
 | J1 base | 17HS4401 | direct | 1/16 | 8.89 |
-| J2 shoulder | 17HS4401S + PG518 (5.18:1) | + GT2 belt 16T → 48T (×3) | 1/8 | 69.07 |
-| J3 elbow | 17HS4401 (on the J2 axis) | GT2 belt 16T → 80T (×5) | 1/8 | 22.22 |
+| J2 shoulder | 17HS4401S + PG518 (5.18:1) | + GT2 belt 16T → 88T (×5.5) | 1/8 | 126.62 |
+| J3 elbow | 17HS4401 (on the J2 axis) | GT2 belt 16T → 104T (×6.5) | 1/8 | 28.89 |
 
 A motor turning the wrong way: flip `DIR_SIGN_Jn` in `config.h` (or swap one coil pair).
 

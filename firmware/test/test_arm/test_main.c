@@ -18,6 +18,7 @@
 extern uint32_t fake_now; extern bool fake_power_ok, fake_ir_blocked; extern rgbc_t fake_rgbc;
 extern bool fake_limit_broken[], fake_limit_dead[];
 extern char fake_log[]; extern char fake_last_tel[];
+extern uint16_t fake_servo_us[];                             // last pulse sent on each PCA9685 channel
 void fake_reset(float, float, float); void fake_tick_1ms(void); void fake_type(const char *);
 float fake_true_deg(int); void fake_clear_log(void); void fake_wipe_eeprom(void); uint8_t *fake_eeprom(void);
 
@@ -118,8 +119,8 @@ void test_ik_golden_vectors(void) {                         // same vectors the 
 // ════════════════════ joints ════════════════════
 void test_joint_conversions(void) {
   TEST_ASSERT_EQUAL_INT32(800, joint_deg_to_steps(J1, 90));            // 8.89 steps/deg
-  TEST_ASSERT_EQUAL_INT32(-691, joint_deg_to_steps(J2, -10));          // 69.07
-  TEST_ASSERT_EQUAL_INT32(2222, joint_deg_to_steps(J3, 100));          // 22.22
+  TEST_ASSERT_EQUAL_INT32(-1266, joint_deg_to_steps(J2, -10));         // 126.62 (PG518 × 16T→88T)
+  TEST_ASSERT_EQUAL_INT32(2889, joint_deg_to_steps(J3, 100));          // 28.89 (16T→104T)
   TEST_ASSERT_EQUAL_UINT16(1500, joint_deg_to_us(J4, 0));              // centre
   TEST_ASSERT_EQUAL_UINT16(1833, joint_deg_to_us(J5, 45));             // 270° servo: 7.41 µs/deg
   TEST_ASSERT_EQUAL_UINT16(2000, joint_deg_to_us(J6, 45));             // 180° servo: 11.1 µs/deg
@@ -323,6 +324,18 @@ void test_move_replies(void) {
   TEST_ASSERT_NOT_NULL(strstr(cmd("MOVE 200 0 100"), "ERR MOVE running"));
   cmd("STOP");
 }
+void test_servo_channels_rev_f(void) {                     // rev F wiring: J5 ch0, J6 ch1, gripper ch2, J4 ch3
+  TEST_ASSERT_TRUE(boot(20, 40, 90));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("MOVEJ 0 30 90 40 50 -30"), "OK MOVEJ"));
+  TEST_ASSERT_TRUE(run_until_log("DONE MOVEJ", 5000));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("GRIP 30"), "OK GRIP"));
+  TEST_ASSERT_TRUE(run_until_log("DONE GRIP", 2000));
+  run_ms(2 * SERVO_UPDATE_MS);                               // the last servo frame goes out
+  TEST_ASSERT_UINT16_WITHIN(6, joint_deg_to_us(J4, 40), fake_servo_us[3]);   // 12-bit PWM round trip
+  TEST_ASSERT_UINT16_WITHIN(6, joint_deg_to_us(J5, 50), fake_servo_us[0]);
+  TEST_ASSERT_UINT16_WITHIN(6, joint_deg_to_us(J6, -30), fake_servo_us[1]);
+  TEST_ASSERT_UINT16_WITHIN(6, joint_deg_to_us(JG, 30), fake_servo_us[2]);
+}
 void test_estop_from_pick(void) {
   TEST_ASSERT_TRUE(boot(20, 40, 90));
   fake_rgbc = RED; fake_ir_blocked = true;
@@ -412,6 +425,7 @@ int main(void) {
   RUN_TEST(test_unknown_colour_is_error);
   RUN_TEST(test_teach_over_serial);
   RUN_TEST(test_move_replies);
+  RUN_TEST(test_servo_channels_rev_f);
   RUN_TEST(test_estop_from_pick);
   RUN_TEST(test_every_command_one_reply);
   RUN_TEST(test_telemetry_format);

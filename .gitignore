@@ -1,9 +1,6 @@
 # PlatformIO
 firmware/.pio/
 .pio/
-# Node / Vite
-node_modules/
-sim/dist/
 *.log
 # Python
 __pycache__/

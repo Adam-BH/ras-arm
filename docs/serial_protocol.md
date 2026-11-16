@@ -1,8 +1,9 @@
-# Serial protocol (board ↔ PC / React app)
+# Serial protocol (board ↔ PC)
 
-The contract between `firmware/src/6_app/console.c`, the virtual twin `sim/src/core/virtualFirmware.ts`
-and the app parser `sim/src/link/protocol.ts`. Tests on both sides check it (`test_every_command_one_reply`,
-`test_telemetry_format`, `protocol.test.ts`, `virtualLink.test.ts`).
+The contract between `firmware/src/6_app/console.c`, the Python twin `pysim/ras_sim/firmware.py` and its
+parser `pysim/ras_sim/protocol.py`. Tests on both sides check it (`test_every_command_one_reply`,
+`test_telemetry_format`; `pysim/tests/test_firmware.py`, `test_serial.py`). `pysim/run_sim.py --serial tcp:5005`
+serves the twin on a port with this exact framing.
 
 - USB serial, **115200 baud**, 8N1, ASCII lines ending in `\n` (`\r` is ignored).
 - Commands are case-insensitive (`move 200 0 100` works). Max line length: 71 characters.

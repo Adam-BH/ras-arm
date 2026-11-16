@@ -8,18 +8,16 @@
     python run_sim.py urdf out.urdf       write the generated arm URDF
 
     python run_sim.py --serial tcp:5005   + the board's serial port: socket://localhost:5005 (pyserial, pio monitor)
-    python run_sim.py --serial COM20      + on a COM port (one end of a com0com pair: the web app opens the other)
+    python run_sim.py --serial COM20      + on a COM port (one end of a com0com pair; open the other end)
     python run_sim.py --serial tcp:5005 --headless     no window: a "board on the desk", until Ctrl-C
 
 Options: --headless (no window, as fast as possible, exit code 1 if a cube ends in the wrong place),
---profile design|firmware (design book constants, default; or config.h as it is), --no-reset (opening the
-serial port does not reset the board), --speed 2 (x real time), --seed N, --fail-pick (the first grasp
+--no-reset (opening the serial port does not reset the board), --speed 2 (x real time), --seed N, --fail-pick (the first grasp
 slips), --log telemetry.csv, --no-camera-window, --quiet.
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -90,7 +88,6 @@ def main():
                     choices=["interactive", "cycle", "vision", "slides", "demo", "urdf"])
     ap.add_argument("out", nargs="?", help="urdf: output file")
     ap.add_argument("--headless", action="store_true")
-    ap.add_argument("--profile", choices=["design", "firmware"], default=os.environ.get("RAS_SIM_PROFILE", "design"))
     ap.add_argument("--serial", metavar="tcp:PORT|COMx", help="expose the board's serial port")
     ap.add_argument("--no-reset", action="store_true", help="opening the serial port does not reset the board")
     ap.add_argument("--cubes", type=int, default=6)
@@ -104,10 +101,9 @@ def main():
     args = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    os.environ["RAS_SIM_PROFILE"] = args.profile          # read by ras_sim.config at import
 
     from ras_sim.app import Simulation
-    from ras_sim.config import FW, PROFILE
+    from ras_sim.config import FW
     from ras_sim.robot_urdf import write_arm_urdf
     from ras_sim.vision import OverheadCamera
 
@@ -130,7 +126,7 @@ def main():
     sim = Simulation(gui=not args.headless, seed=args.seed, echo=lambda ms, ln: say(ln, ms),
                      realtime=not args.headless or serve_only, speed=args.speed)
     sim.emptied = {"A": 0, "B": 0, "A_wrong": 0, "B_wrong": 0}
-    print(f"profile {PROFILE}: L1 {FW.L1:g}, L2 {FW.L2:g}, L3 {FW.L3:g}, shoulder {FW.H_SHOULDER:g} mm, "
+    print(f"config.h: L1 {FW.L1:g}, L2 {FW.L2:g}, L3 {FW.L3:g}, shoulder {FW.H_SHOULDER:g} mm, "
           f"grip z {FW.CELL_GRIP_Z:g}, drop z {FW.CELL_DROP_Z:g}", flush=True)
     bridge = None
     if args.serial:

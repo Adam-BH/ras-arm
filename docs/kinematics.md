@@ -1,8 +1,8 @@
 # Kinematics
 
-Code: `firmware/src/4_motion/kinematics.c`, ported line for line to `sim/src/core/kinematics.ts`.
+Code: `firmware/src/4_motion/kinematics.c`, ported line for line to `pysim/ras_sim/kinematics.py`.
 Both are tested against the same float64 reference vectors from `tools/ik_reference.py`
-(632 poses, C and TS must agree within 0.05° and 0.1 mm).
+(599 poses, C and Python must agree within 0.05° and 0.1 mm).
 
 ## Conventions
 - **World frame**: origin on the base axis at table level. **x** forward (toward the cradle), **y** left, **z** up.
@@ -11,7 +11,8 @@ Both are tested against the same float64 reference vectors from `tools/ik_refere
 - **J3** elbow bend **relative to the upper arm**, 0 = straight.
 - **J4** forearm roll (0 for picking), **J5** wrist pitch, **J6** wrist roll.
 - The gripper is kept **vertical** (pointing down): J2 + J3 + J5 = 180°.
-- Lengths: L1 = 180 (shoulder → elbow), L2 = 140 (elbow → wrist), L3 = 110 (wrist → tip), shoulder height H = 120 mm.
+- Lengths (design book, adopted design): L1 = 165 (shoulder → elbow), L2 = 190 (elbow → wrist pitch, J4 at 140),
+  L3 = 200 (wrist pitch → fingertip: 100 mm link + 100 mm gripper), shoulder height H = 300 mm (base tower).
 
 ## Inverse kinematics (tip pose → joints)
 Because the tool is vertical, the wrist sits L3 straight above the tip. That leaves a base yaw plus a
@@ -43,18 +44,18 @@ x = r·cos J1,  y = r·sin J1,  z = z_w + H − L3,  roll = J6 + J1
 ## Stations (all reachable, tested)
 | Pose | x, y, z (mm) | J1 / J2 / J3 / J5 / J6 (deg) |
 |---|---|---|
-| HOME | 160, 0, 170 | 0 / 6.8 / 90.9 / 82.3 / 0 |
-| CUBE (grip) | 220, 0, 24 | 0 / 47.0 / 93.9 / 39.1 / 0 |
-| BIN A drop | 0, 220, 78 | 90 / 35.4 / 88.8 / 55.8 / −90 |
-| BIN B drop | 0, −220, 78 | −90 / 35.4 / 88.8 / 55.8 / +90 |
+| HOME | 160, 0, 170 | 0 / −1.6 / 121.6 / 60.0 / 0 |
+| CUBE (grip, fingertips at the centre of the 35 mm cube on the 20 mm V-cradle) | 220, 0, 37.5 | 0 / 51.0 / 100.1 / 28.9 / 0 |
+| BIN A drop | 0, 220, 88 | 90 / 36.2 / 103.6 / 40.2 / −90 |
+| BIN B drop | 0, −220, 88 | −90 / 36.2 / 103.6 / 40.2 / +90 |
 
 ⚠ At the bins J6 sits exactly on its ±90° limit (roll 0 in world yaw). A taught bin pose with a
 roll that pushes J6 past ±90° is refused (`ERR … unreachable`); widen the J6 range in `config.h` if the
 servo allows it, or teach the bins with roll 0.
 
 ## Steps per joint degree
-`200 steps × microstep × ratio / 360`: J1 = 200·16/360 ≈ 8.89 · J2 = 200·8·5.18·3/360 ≈ 69.07 ·
-J3 = 200·8·5/360 ≈ 22.22. Servos: `µs = centre + value × µs_per_unit` (`config.h`; 270° DS3218 ≈ 7.41 µs/°,
+`200 steps × microstep × ratio / 360`: J1 = 200·16/360 ≈ 8.89 · J2 = 200·8·5.18·5.5/360 ≈ 126.62
+(PG518 × belt 16T → 88T) · J3 = 200·8·6.5/360 ≈ 28.89 (belt 16T → 104T). Servos: `µs = centre + value × µs_per_unit` (`config.h`; 270° DS3218 ≈ 7.41 µs/°,
 180° MG996 ≈ 11.1 µs/°, gripper 20 µs/mm from 1000 µs closed).
 
 ## Straight lines

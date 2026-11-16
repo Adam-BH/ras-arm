@@ -23,33 +23,31 @@ python run_sim.py demo --headless      # all three, no window, ~8x real time, ex
 python run_sim.py --serial tcp:5005    # + the board's serial port (see "Serial port")
 pytest tests                           # 31 tests, ~35 s
 ```
-Options: `--profile design|firmware`, `--serial tcp:PORT|COMx`, `--no-reset`, `--speed 2` (× real time),
+Options: `--serial tcp:PORT|COMx`, `--no-reset`, `--speed 2` (× real time),
 `--seed N`, `--fail-pick` (the first grasp slips), `--log tel.csv` (the 20 Hz telemetry, same format as the
 board), `--no-camera-window`, `--quiet`. `python run_sim.py urdf ras_arm.urdf` writes the generated URDF.
 
-## Profiles: the design book or config.h
-The design book's appendix A.1 lists the firmware constants still to change in `config.h` before flashing.
-pysim reads `config.h` and, in the default **`design`** profile, applies that list on top of it (and only
-that list), so the twin runs the firmware as it will be. **`firmware`** uses `config.h` exactly as it is.
+## The design book's arm, from config.h
+`firmware/src/config.h` carries the design book's adopted design (appendix A.1 applied) and pysim reads it
+at import, so the sim always follows the firmware:
 
-| | `config.h` today (`--profile firmware`) | design book (`--profile design`, default) |
+| | value | design book |
 |---|---|---|
-| L1 / L2 (shoulder → elbow → wrist pitch) | 180 / 140 mm | **165 / 190** (Table 3) |
-| L3 (wrist pitch → fingertip, gripper vertical) | 110 | **200** (100 link + 100 gripper) |
-| Shoulder height | 120 | **300** (base tower) |
-| Steps / joint degree J2, J3 | 69.07, 22.22 (belts ×3, ×5) | **126.62, 28.89** (16T→88T, 16T→104T) |
-| PCA9685 channels J4, J5, J6, gripper | 0, 1, 2, 3 | **3, 0, 1, 2** (rev F) |
-| Grip / drop height | 24 / 78 | **37.5 / 88** (Table 4) |
-| Object, cradle | 25 mm cube on the table | **35 mm, 21 g** cube on the **20 mm V-cradle** |
+| L1 / L2 (shoulder → elbow → wrist pitch) | 165 / 190 mm | Table 3 |
+| L3 (wrist pitch → fingertip, gripper vertical) | 200 mm (100 link + 100 gripper) | Table 3 (T) |
+| Shoulder height | 300 mm (base tower) | Sec. 2.4 |
+| Steps / joint degree J2, J3 | 126.62, 28.89 (16T→88T, 16T→104T, 1/8) | Table 4 |
+| PCA9685 channels J4, J5, J6, gripper | 3, 0, 1, 2 | rev F, Table 11 |
+| Grip / drop height | 37.5 / 88 mm | Table 4 |
+| Object, cradle (sim only) | 35 mm, 21 g cube on the 20 mm V-cradle | Sec. 1.3, P14 |
 
-Every other number (limits, speeds, timings, decisions, pins) is `config.h`'s in both profiles.
-The stations reproduce Table 4 to 0.05° (`test_design_book_stations`); the IK port still matches the C and
-TS firmware on `config.h`'s geometry (the golden vectors of `tools/ik_reference.py`).
+The stations reproduce Table 4 to 0.05° (`test_design_book_stations`); the IK port matches the C firmware on
+the golden vectors of `tools/ik_reference.py` (`pysim/tests/ik_vectors.json`).
 
 ## What is simulated
 | Layer | What | File |
 |---|---|---|
-| Robot | URDF generated from the profile: base housing (J1 motor underneath), turntable, 300 mm tower in two parts, shoulder fork, J2 17HS4401S + PG518 on the tower top 62 mm from the shoulder, J3 motor on the shoulder axis, GT2 belts on the 88T / 104T pulleys, 32 × 42 and 26 × 34 box links with Ø48 bosses, J4 at 140 mm with its DS3218MG, J5 DS3218MG, J6 MG996R, gripper (MG996R, gears A / B, parallel fingers, V-groove pads). Masses from Table 3 (ρ1, ρ2, elbow 97 g, servos, gripper 180 g). Same joint names, signs and zero as the ROS 2 twin. `tool_tip` = firmware FK to 0.01 mm | `robot_urdf.py` |
+| Robot | URDF generated from `config.h`: base housing (J1 motor underneath), turntable, 300 mm tower in two parts, shoulder fork, J2 17HS4401S + PG518 on the tower top 62 mm from the shoulder, J3 motor on the shoulder axis, GT2 belts on the 88T / 104T pulleys, 32 × 42 and 26 × 34 box links with Ø48 bosses, J4 at 140 mm with its DS3218MG, J5 DS3218MG, J6 MG996R, gripper (MG996R, gears A / B, parallel fingers, V-groove pads). Masses from Table 3 (ρ1, ρ2, elbow 97 g, servos, gripper 180 g). Joint names, signs and zero from docs/kinematics.md. `tool_tip` = firmware FK to 0.01 mm | `robot_urdf.py` |
 | Torques | Rated, from the transmissions (Table 5): J1 0.49, J2 11.9, J3 3.03 N·m (usable = half), servos 1.96 / 1.96 / 1.08 | `config.py` |
 | Steppers J1–J3 | Open loop: the firmware counts steps, the motor sits at count + **offset**. Unknown at power-up, re-learned by homing, changed by lost steps. Whole microsteps. Torque-limited | `world.py` |
 | Servos J4–J6, gripper | Absolute, slew toward the command at their top speed. Fingers close on the cube with a force limit (the servo stalls on it), µ 0.4 (PLA on PLA, Sec. 3.2.1) | `world.py` |
@@ -60,7 +58,7 @@ TS firmware on `config.h`'s geometry (the golden vectors of `tools/ik_reference.
 | TCS34725 | In the cradle floor: ambient + LED × cube colour × 1/(1+(d/8 mm)²) + 2 % noise. `CAL RED/BLUE/EMPTY` work on it | `world.py` |
 | E-stop | Cuts the motor rail: every joint goes limp (detent × ratio + friction), the arm sags, a held cube falls | `world.py` |
 | Board reset | EN pulled up (rev F): steppers off, servos keep their last pulse; 1.6 s later the sketch starts from scratch | `app.py` |
-| Firmware | Port of `virtualFirmware.ts`: 11 states, homing, pick / verify / place, decisions R1–R9, console (all 19 commands), telemetry, events | `firmware.py` |
+| Firmware | Python twin of `firmware/src/{3_joints … 6_app}`: 11 states, homing, pick / verify / place, decisions R1–R9, console (all 19 commands), telemetry, events | `firmware.py` |
 | Serial port | The firmware's bytes on TCP or a COM port, with the UNO's framing and auto-reset | `serial_bridge.py` |
 | Host scripts | Talk to the twin only through the protocol: cradle feeder, vision sort, keyframes | `app.py`, `feeder.py`, `sorter.py`, `slides.py` |
 
@@ -85,14 +83,13 @@ python -m serial.tools.miniterm socket://localhost:5005 115200           # pyser
 Any pyserial program works unchanged: `serial.serial_for_url("socket://localhost:5005", 115200)` instead of
 `serial.Serial("COM5", 115200)`.
 
-**A COM port (the web app's USB mode, Arduino serial monitor, PuTTY):** Windows needs a virtual null-modem
+**A COM port (Arduino serial monitor, PuTTY, any COM-port program):** Windows needs a virtual null-modem
 pair. Install [com0com](https://sourceforge.net/projects/com0com/) (signed driver, admin rights), create a
 pair, e.g. COM20 ↔ COM21, then:
 ```bash
 python run_sim.py --serial COM20
 ```
-and open **COM21** in the other program: in the web app, USB mode → Connect → pick COM21. The board resets
-when the program opens the port (com0com passes DTR to the sim as DSR), exactly like plugging in the UNO.
+and open **COM21** in the other program. The board resets when the program opens the port (com0com passes DTR to the sim as DSR), exactly like plugging in the UNO.
 
 The window shows the port's status and line counts; **Board reset** (or `!reset`) resets it by hand.
 
@@ -116,7 +113,7 @@ unprojected through the depth buffer → top face only → centre, yaw, size →
 The loop uses only `STATUS` / `MOVE` / `GRIP`: park out of the picture → look → nearest reachable cube →
 fingers square to its faces → grip at the cube's measured centre height (table or cradle) → look again
 (still there → slipped → retry with the jiggle offsets) → drop, spread over 4 spots per bin.
-Same idea as the ICRA arm and the web twin's vision sort (feature/vision-sort).
+Same idea as the ICRA arm's vision pipeline.
 
 ## Keyframes ("slides")
 A list of poses visited in order, each joint angles (J1..J6, sent as `MOVEJ`) or a tip pose (`MOVE`, solved
@@ -124,8 +121,8 @@ by the firmware IK); the gripper acts **before** the arm moves in that slide. Ed
 `ras_sim/slides.py`, or `--file` a JSON list: `[{"pose": [160, 0, 170, 0], "gripper": "open", "duration": 1.5}]`.
 
 ## Tests (`pytest tests`, 31)
-- **Model**: `config.h` parse · design-book profile (A.1 values, Table 5 torques, ratios) · IK vs the golden
-  vectors on `config.h` geometry · **Table 4 stations on the design geometry** · URDF tip vs firmware FK ·
+- **Model**: `config.h` parse · `config.h` = the design book (A.1 values, Table 5 torques, ratios) · IK vs the
+  golden vectors · **Table 4 stations** · URDF tip vs firmware FK ·
   gripper vertical, fingers follow roll · hard stops past the switches.
 - **Firmware on physics**: console, telemetry, homing from an unknown pose, red → A / blue → B, slip → retry,
   out of retries → `PICK_FAILED`, step loss (small → re-home fixes it; large → `PICK_FAILED` → `RESET`),
@@ -134,8 +131,6 @@ by the firmware IK); the gripper acts **before** the arm moves in that slide. Ed
   line, split writes, two lines in one write, 71-char cut, unknown), `DONE` + 20 Hz telemetry, one host at a
   time, reconnect resets, `--no-reset`.
 - **Vision**: accuracy, no false cubes, grasp roll, full sort with a slip, keyframe demo.
-
-`RAS_SIM_PROFILE=firmware pytest tests/test_firmware.py tests/test_serial.py` runs them on `config.h` as it is.
 
 ## Found by the physics (design-book arm)
 - **The success criterion of Sec. 1.2 fails in the bins, not in the arm.** Ten cubes, five of each colour, one
@@ -149,7 +144,7 @@ by the firmware IK); the gripper acts **before** the arm moves in that slide. Ed
   pull-ups the steppers are off for the ~1.6 s of the bootloader. Idle at HOME the tip sags 40 mm; holding a cube
   over a bin it falls 96 mm and the cube lands on the table. This rests on the model's unpowered holding torque
   (detent × ratio + friction, `SIM.unpowered_hold`): worth one bench check (press the UNO's reset at HOME).
-  For the demo (standalone, R12) it does not matter; while developing with the web app connected, avoid
+  For the demo (standalone, R12) it does not matter; while developing with a PC connected, avoid
   reconnecting mid-move, or disable auto-reset (10 µF between RESET and GND).
 - The E-stop finding of the first version (homing jammed by a re-grabbed cube after `RESET`) was on the old
   180/140 arm; on the design-book arm the same scenario homes fine.
@@ -157,9 +152,9 @@ by the firmware IK); the gripper acts **before** the arm moves in that slide. Ed
 ## Files
 ```
 pysim/
-  run_sim.py           CLI: interactive, cycle, vision, slides, demo, urdf; --profile, --serial
-  ras_sim/config.py    config.h parser (FW_RAW), design-book profile (FW), sim parameters (SIM)
-  ras_sim/kinematics.py, protocol.py      ports of kinematics.c / protocol.ts
+  run_sim.py           CLI: interactive, cycle, vision, slides, demo, urdf; --serial
+  ras_sim/config.py    config.h parser (FW) + sim parameters (SIM)
+  ras_sim/kinematics.py, protocol.py      ports of kinematics.c and of the console protocol
   ras_sim/robot_urdf.py                   the design book's arm as a URDF
   ras_sim/world.py     PyBullet cell: arm drive (steppers, servos, EN, E-stop), cradle, cubes, sensors, faults
   ras_sim/firmware.py  the firmware twin (FSM, tasks, decisions, console, telemetry)
@@ -171,5 +166,5 @@ pysim/
   ras_sim/feeder.py    cradle feeder for the RUN cycle
   ras_sim/gui.py       PyBullet buttons + overlay, terminal console, OpenCV camera window
   img/                 renders for this page
-  tests/               model, firmware on physics, serial port, vision
+  tests/               model, firmware on physics, serial port, vision; ik_vectors.json (golden IK vectors)
 ```

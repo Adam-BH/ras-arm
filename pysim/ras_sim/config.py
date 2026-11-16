@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import ast
 import operator
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,26 +99,7 @@ class _Namespace:
         return f"<config.h: {len(self.__dict__)} values>"
 
 
-# The design book (RAS_Arm_Design_Book.pdf, 16 Nov 2026) lists, in appendix A.1, the firmware constants
-# still to update in config.h before flashing. Profile "design" (the default) applies them on top of
-# config.h, so the twin runs the firmware as it will be; profile "firmware" uses config.h untouched.
-DESIGN_BOOK = {
-    "L1": 165.0, "L2": 190.0,                          # Table 3 (adopted design, 355 mm reach)
-    "L3": 200.0,                                       # T: wrist pitch → fingertip = 100 link + 100 gripper
-    "H_SHOULDER": 300.0,                               # base tower
-    "SPD_J2": 200.0 * 8 * 5.18 * 5.5 / 360.0,          # 126.62: PG518 × belt 16T→88T, 1/8 (Table 4)
-    "SPD_J3": 200.0 * 8 * 6.5 / 360.0,                 #  28.89: belt 16T→104T, 1/8
-    "SERVO_CH_J4": 3, "SERVO_CH_J5": 0, "SERVO_CH_J6": 1, "SERVO_CH_GRIP": 2,   # rev F (Table 11)
-    "CELL_GRIP_Z": 37.5, "CELL_DROP_Z": 88.0,          # Table 4 stations (HOME and SAFE unchanged)
-}
-PROFILES = ("design", "firmware")
-PROFILE = os.environ.get("RAS_SIM_PROFILE", "design")
-if PROFILE not in PROFILES:
-    raise ValueError(f"RAS_SIM_PROFILE must be one of {PROFILES}, not {PROFILE!r}")
-
-FW_RAW = _Namespace(parse_config_h())                  # config.h exactly as it is
-FW = _Namespace({**FW_RAW.__dict__, **(DESIGN_BOOK if PROFILE == "design" else {})})
-FW.SERVO_CH = [FW.SERVO_CH_J4, FW.SERVO_CH_J5, FW.SERVO_CH_J6, FW.SERVO_CH_GRIP]
+FW = _Namespace(parse_config_h())     # config.h holds the design book's values (adopted design, rev F)
 
 
 @dataclass(frozen=True)
@@ -142,7 +122,7 @@ CELL = {
 @dataclass
 class SimParams:
     """Simulation only: nothing here exists in the firmware. mm, deg, ms, kg, N unless the name says.
-    Defaults = the design book (RAS_Arm_Design_Book.pdf): Table 3 masses, Fig. 4 layout, Sec. 2.4 sections."""
+    From the design book (RAS_Arm_Design_Book.pdf): Table 3 masses, Fig. 4 layout, Sec. 2.4 sections."""
     dt_ms: float = 1.0                     # physics step (1 kHz, small cubes need it)
     tick_ms: int = 5                       # firmware loop period (5 physics steps)
     solver_iterations: int = 60            # 30…150 give the same results in the tests; 60 keeps a margin
@@ -201,11 +181,11 @@ class SimParams:
     colour_falloff_mm: float = 8.0         # reflected light ∝ 1 / (1 + (d / falloff)²)
     colour_noise: float = 0.02             # 2 % per channel and sample
 
-    # overhead camera (same placement as the web twin's vision camera, feature/vision-sort)
+    # overhead camera: 500 mm above the pick zone, ≈ 1 px/mm
     camera: dict = field(default_factory=lambda: {"x": 205.0, "y": 0.0, "z": 500.0, "fov_deg": 33.4,
                                                   "width": 400, "height": 300})
 
-    # ── derived from the transmissions in FW (so both profiles stay consistent) ──
+    # ── derived from the transmissions in config.h ──
     def ratio(self, j: int) -> float:
         """stepper joint j: motor turns per joint turn, from the steps per degree"""
         spd, micro = (FW.SPD_J1, FW.SPD_J2, FW.SPD_J3)[j], (16, 8, 8)[j]
@@ -231,10 +211,4 @@ class SimParams:
         return FW.L3 - self.gripper_len
 
 
-# the old cell, for profile "firmware" (config.h as it is: 25 mm cube on the table, 110 mm tool)
-FIRMWARE_CELL = dict(cube_size=25.0, cube_mass=0.012, cube_friction=0.9, cradle_top=0.0, cradle_fence=(4.0, 16.0),
-                     d4=100.0, gripper_len=70.0, finger_len=44.0, finger_beyond=7.0, finger_pad=1.0,
-                     finger_friction=1.2, ir_beam_z=12.5,
-                     self_collision=False)               # the design shapes do not fit the short old arm
-
-SIM = SimParams() if PROFILE == "design" else SimParams(**FIRMWARE_CELL)
+SIM = SimParams()

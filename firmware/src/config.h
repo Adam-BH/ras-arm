@@ -1,13 +1,13 @@
 // config.h — every number of the robot in ONE place + the shared types.
 // When the CAD or the wiring changes, only this file changes.
-// The sim mirrors the geometry/limits/workcell in sim/src/core/config.ts — keep both in sync.
+// pysim reads this file directly (pysim/ras_sim/config.py): the physics sim always follows it.
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
 
 #define FW_VERSION "1.0.0"
 
-// ───────────── Pins (Arduino UNO + CNC Shield V3) ─────────────
+// ───────────── Pins (Arduino UNO; rev F: a TMC2209 at each joint, same pins as the CNC Shield layout) ─────────────
 #define PIN_STEP_J1   2     // shield X  (PD2)
 #define PIN_STEP_J2   3     // shield Y  (PD3)
 #define PIN_STEP_J3   4     // shield Z  (PD4)
@@ -36,20 +36,20 @@
 #define I2C_TCS34725  0x29  // colour sensor
 #define WATCHDOG_MS   250   // kicked every loop()
 
-// PCA9685 channels
-#define SERVO_CH_J4   0
-#define SERVO_CH_J5   1
-#define SERVO_CH_J6   2
-#define SERVO_CH_GRIP 3
+// PCA9685 channels (electronics rev F: J4 forearm roll was added on channel 3, nothing else re-wired)
+#define SERVO_CH_J4   3
+#define SERVO_CH_J5   0
+#define SERVO_CH_J6   1
+#define SERVO_CH_GRIP 2
 #define PCA9685_OSC_HZ   25000000UL
 #define SERVO_FRAME_HZ   50          // 20 ms servo period
 #define SERVO_UPDATE_MS  20          // servo ramps are sent at the frame rate (I²C is slow)
 
-// ───────────── Geometry (mm) ─────────────
-#define L1          180.0f  // shoulder → elbow
-#define L2          140.0f  // elbow → wrist
-#define L3          110.0f  // wrist → gripper tip (kept vertical)
-#define H_SHOULDER  120.0f  // shoulder axis above the table
+// ───────────── Geometry (mm, design book: adopted design, Table 3) ─────────────
+#define L1          165.0f  // shoulder → elbow
+#define L2          190.0f  // elbow → wrist pitch axis (J4 forearm roll at 140 from the elbow)
+#define L3          200.0f  // wrist pitch axis → fingertip, kept vertical (100 mm link + 100 mm gripper)
+#define H_SHOULDER  300.0f  // shoulder axis above the table (base tower)
 #define IK_MAX_COS3 0.995f  // reject (nearly) straight elbow
 #define IK_MIN_COS3 -1.0f
 
@@ -57,11 +57,13 @@
 enum { J1, J2, J3, J4, J5, J6, JG, NJ };   // JG = gripper (value in mm, not deg)
 #define N_STEPPERS 3                        // J1..J3 are steppers, J4..JG servos
 #define N_SERVOS   (NJ - N_STEPPERS)
+// servo index (J4, J5, J6, grip) → PCA9685 channel
+static const uint8_t SERVO_CH[N_SERVOS] = {SERVO_CH_J4, SERVO_CH_J5, SERVO_CH_J6, SERVO_CH_GRIP};
 
-// steps per joint degree = 200 steps × microstep × ratio / 360  (microstep = shield jumpers)
-#define SPD_J1  (200.0f * 16 * 1.0f         / 360.0f)  //  8.89  direct drive, 1/16
-#define SPD_J2  (200.0f *  8 * 5.18f * 3.0f / 360.0f)  // 69.07  PG518 gearbox × belt 3, 1/8
-#define SPD_J3  (200.0f *  8 * 5.0f         / 360.0f)  // 22.22  belt ×5, 1/8
+// steps per joint degree = 200 steps × microstep × ratio / 360  (microstep wired at each driver)
+#define SPD_J1  (200.0f * 16 * 1.0f         / 360.0f)  //   8.89  direct drive, 1/16
+#define SPD_J2  (200.0f *  8 * 5.18f * 5.5f / 360.0f)  // 126.62  PG518 gearbox × belt 16T→88T, 1/8
+#define SPD_J3  (200.0f *  8 * 6.5f         / 360.0f)  //  28.89  belt 16T→104T, 1/8
 // flip a motor's direction here if it turns the wrong way (1 or -1)
 #define DIR_SIGN_J1  1
 #define DIR_SIGN_J2  1
@@ -123,9 +125,9 @@ static const float SERVO_US_PER_UNIT[N_SERVOS] = {SERVO_SPAN_US/DS3218_RANGE_DEG
 #define CELL_HOME_X   160.0f
 #define CELL_HOME_Z   170.0f
 #define CELL_CRADLE_X 220.0f
-#define CELL_GRIP_Z    24.0f
+#define CELL_GRIP_Z    37.5f     // fingertips at the centre of a 35 mm cube sitting on the 20 mm V-cradle
 #define CELL_BIN_Y    220.0f     // bin A at +y (red), bin B at −y (blue)
-#define CELL_DROP_Z    78.0f
+#define CELL_DROP_Z    88.0f     // design book Table 4 stations: HOME, SAFE 110, GRIP 37.5, DROP 88
 
 // ───────────── Cycle ─────────────
 #define BOOT_SETTLE_MS   500     // servos reach neutral before homing

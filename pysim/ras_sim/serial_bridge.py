@@ -3,7 +3,7 @@
     --serial tcp:5005   a TCP port speaking the raw serial stream. Any pyserial program opens it as
                         serial.serial_for_url("socket://localhost:5005", 115200); PlatformIO too:
                         pio device monitor --port socket://localhost:5005 --baud 115200
-    --serial COM20      a real (virtual) COM port, e.g. one end of a com0com pair: the web app's USB mode,
+    --serial COM20      a real (virtual) COM port, e.g. one end of a com0com pair: a serial monitor,
                         the Arduino serial monitor or PuTTY open the other end (COM21) as if it were the UNO.
 
 Like the board (firmware/src/2_devices/serial_link.c, 6_app/console.c):

@@ -1,7 +1,7 @@
 """A Python twin of the firmware: same protocol, same 11-state machine, same decisions, same motion
-profiles. Port of sim/src/core/virtualFirmware.ts (itself a port of firmware/src/{3_joints … 6_app}).
+profiles. Port of firmware/src/{3_joints … 6_app}.
 
-The difference with the web twin: there is no scripted world. The twin drives a HAL (world.World)
+There is no scripted world. The twin drives a HAL (world.World)
 and reads back only what the board reads (limit switches, IR beam, colour sensor, E-stop sense);
 whether a grasp holds, where a dropped cube lands or how far the arm sags on an E-stop is physics.
 """

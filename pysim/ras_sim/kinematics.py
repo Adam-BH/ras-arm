@@ -1,10 +1,10 @@
-"""Port of firmware/src/4_motion/kinematics.c (same as sim/src/core/kinematics.ts), docs/kinematics.md.
+"""Port of firmware/src/4_motion/kinematics.c, docs/kinematics.md.
 
 x forward (cradle), y left, z up, origin = base axis on the table. Degrees and mm.
 J1 yaw (0 = cradle), J2 from vertical (+ forward), J3 relative to the upper arm (0 = straight),
 J5 = 180 − J2 − J3 keeps the gripper vertical, J6 = roll − J1, J4 = 0.
-The geometry is the active profile's (config.FW); tests also run it on config.h untouched (FW_RAW) against
-the golden vectors of tools/ik_reference.py, and on the design book against its Table 4.
+The geometry is config.h's. Tested against the golden vectors of tools/ik_reference.py (the same ones the
+C firmware is tested on) and against the design book's Table 4.
 """
 from __future__ import annotations
 
