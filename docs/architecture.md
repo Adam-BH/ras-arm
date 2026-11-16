@@ -7,7 +7,7 @@ Arduino include, so the whole robot runs on a PC against a fake HAL (`pio test -
 ```
 6 App      fsm.c (11 states) · console.c (serial protocol, telemetry)
 5 Tasks    tasks.c (homing, colour, pick, place, return, manual moves, teach) · decisions.c ★
-4 Motion   kinematics.c (IK/FK) · motion.c (move_to, line, jog, poses)
+4 Motion   kinematics.c (IK/FK) · motion.c (move_to, line, jog) · stations.c (workcell table + validation)
 3 Joints   joints.c (7 joints in degrees: deg ↔ steps / µs, limits, speed limits, servo ramps)
 2 Devices  actuators.c (DDA stepper ISR, trapezoid, PCA9685, LED) · sensors.c · serial_link.c · storage.c
 1 HAL      hal.h · hal_avr.cpp (UNO, the only C++/Arduino file) · test/hal_fake.c (PC)
@@ -18,7 +18,7 @@ Arduino include, so the whole robot runs on a PC against a fake HAL (`pio test -
 | 1 HAL | registers, Timer1, Wire, EEPROM, Serial | what a joint is |
 | 2 Devices | steps, µs, debouncing, I²C protocols, CRC | degrees |
 | 3 Joints | degrees, limits, which joint is a stepper | Cartesian space |
-| 4 Motion | mm, IK, straight lines, saved poses | cubes, colours |
+| 4 Motion | mm, IK, straight lines, stations (named poses, reach checks) | cubes, colours |
 | 5 Tasks | sequences (pick, place, homing) and the rules | serial text |
 | 6 App | states, commands, protocol | registers |
 
@@ -28,7 +28,8 @@ Arduino include, so the whole robot runs on a PC against a fake HAL (`pio test -
 DDA ISR, servo ramps go to the PCA9685 → `hal_step_pulse()` toggles PORTD.
 
 ## Documented exceptions (data services, not motion)
-- `storage.c` (layer 2, CRC'd EEPROM records) is used by `motion.c` (poses) and `tasks.c` (colour calibration).
+- `storage.c` (layer 2, CRC'd EEPROM records) is used by `stations.c` (layout) and `tasks.c` (colour calibration).
+- `console.c` edits the station table directly (`ST …`, gated by `fsm_teaching()`), and `fsm.c` reads the colour → bin map: data, not motion.
 - `serial_link.c` and the status LED (layer 2) are driven by the app layer directly.
 - `fsm.c` and `console.c` *read* sensors (IR, E-stop, switches) and joint angles directly: status reads.
 

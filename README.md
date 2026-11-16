@@ -26,7 +26,7 @@ logic in the browser without a board).
 |---|---|---|
 | 6 App | `firmware/src/6_app/` | `fsm` (11 states) · `console` (serial protocol, telemetry) |
 | 5 Tasks | `firmware/src/5_tasks/` | `tasks` (homing, colour, pick, place, teach) · `decisions` ★ all tunable rules |
-| 4 Motion | `firmware/src/4_motion/` | `kinematics` (IK/FK) · `motion` (moves, straight lines, saved poses) |
+| 4 Motion | `firmware/src/4_motion/` | `kinematics` (IK/FK) · `motion` (moves, straight lines) · `stations` (workcell table, validation) |
 | 3 Joints | `firmware/src/3_joints/` | 7 joints in degrees (stepper or servo hidden), limits, speed limits |
 | 2 Devices | `firmware/src/2_devices/` | steppers (DDA ISR, trapezoid) + servos + LED · sensors · serial link · EEPROM storage |
 | 1 HAL | `firmware/src/1_hal/` | `hal.h` contract · `hal_avr.cpp` (UNO) · `test/test_arm/hal_fake.c` (PC) |
@@ -52,19 +52,19 @@ Full table, power and LED codes: [docs/wiring_pinout.md](docs/wiring_pinout.md).
 115200 baud, one ASCII command per line, exactly one `OK <CMD>` / `ERR <CMD> <reason>` reply each,
 `DONE <CMD>` when a move ends, `EV …` events, 20 Hz telemetry:
 ```
-T,<ms>,<state>,<j1..j6 ×10>,<grip ×10>,<x>,<y>,<z>,<ir>,<colour>,<err>,<lim1><lim2><lim3>,<estop>
+T,<ms>,<state>,<j1..j6 ×10>,<grip ×10>,<x>,<y>,<z>,<ir>,<colour>,<err>,<lim1><lim2><lim3>,<estop>,<layout>
 ```
-Commands: `PING STATUS HOME RUN STOP RESET TEACH DONE MOVE LINE MOVEJ JOG JOGJ GRIP SAVE GO POSES CAL SET`.
+Commands: `PING STATUS HOME RUN STOP RESET TEACH DONE MOVE LINE MOVEJ JOG JOGJ GRIP SAVE GO POSES CAL SET ST`.
 Full spec: [docs/serial_protocol.md](docs/serial_protocol.md).
 
 ## Firmware: build, flash, test
 Needs [PlatformIO](https://platformio.org/install/cli) (`pipx install platformio`).
 ```bash
 cd firmware
-pio run -e uno                 # build (prints RAM / flash: 67.3 % / 86 %)
+pio run -e uno                 # build (prints RAM / flash: 69.2 % / 97.4 % — flash is nearly full)
 pio run -e uno -t upload       # flash the UNO
 pio device monitor             # talk to it: PING, STATUS, TEACH, JOG 0 0 -5, SAVE CUBE, RUN …
-pio test -e native             # 23 tests on your PC against a fake robot
+pio test -e native             # 31 tests on your PC against a fake robot
 ```
 Shield clone with Z− on D12? Add `-DLIMIT_Z_ON_D12` to `build_flags` in `platformio.ini`.
 
@@ -73,19 +73,50 @@ Shield clone with Z− on D12? Add `-DLIMIT_Z_ON_D12` to `build_flags` in `platf
 cd sim
 npm i
 npm run dev                    # http://localhost:5173
-npm test                       # Vitest: protocol, golden IK vectors, virtual cycle/teach
+npm test                       # Vitest: protocol, golden IK + station vectors, virtual cycle/teach/workcell
 npm run build                  # static site in sim/dist (GitHub Pages ready)
 ```
 - **Virtual** mode: no board needed. The TypeScript twin of the firmware runs the same protocol and
-  state machine. Place a red/blue cube, make the next pick fail, press the E-stop, cut a switch wire.
+  state machine. Place a red/blue/unknown cube, make the next pick fail, press the E-stop, cut a switch wire.
 - **USB** mode: **Chrome or Edge** (Web Serial). Connect → pick the Arduino.
-- Panels: 3D workcell to scale · Move-to (MOVE/LINE checked with the TS IK, MOVEJ/GRIP sliders) ·
-  Teach (jog pad, per-joint jog, save/go poses, colour calibration) · Run (HOME/RUN/STOP/RESET, live
+- Panels: 3D workcell to scale with draggable stations + reach shading · Workcell layout (load/send/export) ·
+  Move-to (MOVE/LINE checked with the TS IK, MOVEJ/GRIP sliders) · Teach (jog pad, per-joint jog,
+  save/go/preview stations, add station here, colour → bin, colour calibration) · Run (HOME/RUN/STOP/RESET, live
   state diagram, cycle counter) · Telemetry plots (20 s) · Serial console.
+
+## Configurable workcell
+The workcell is **data, not code**: a table of named stations (one `PICK` cradle, `BIN`s, `PARK` poses such
+as `HOME`) and a colour → bin map, stored in EEPROM. RED, BLUE and UNKNOWN each map to a bin or to none;
+a bin mapped to UNKNOWN is the **reject bin** (otherwise an unknown colour is an ERROR, as before).
+Empty or corrupt EEPROM → the CAD default layout, so the minimum demo (2 colours, 2 bins) needs no setup:
+
+| Station | Type | x, y, z (mm), roll | Mapping |
+|---|---|---|---|
+| HOME | PARK | 160, 0, 170, 0 | |
+| CUBE | PICK | 220, 0, 24, 0 | |
+| BIN_A | BIN | 0, 220, 78, 90 | RED → BIN_A |
+| BIN_B | BIN | 0, −220, 78, −90 | BLUE → BIN_B |
+
+**The flow, in 3 steps**
+1. **Lay out in the sim**: drag stations on the baseplate (green shading = the selected station is valid
+   there, computed with the firmware's own rules), set the colour → bin map, Export/Import as JSON.
+2. **Send to arm**: the app enters TEACH, sends `ST SET` per station + `ST MAP` per colour, then `ST COMMIT`,
+   and reads back what the arm kept. A refused station shows the arm's reason on its marker.
+3. **Touch up with teach mode** on the real arm (jog → `SAVE <name>`, or `ST ADD <name> BIN` at the tip),
+   check with **Preview** (`ST GO`), then `ST COMMIT`.
+
+**Rules** (the firmware is the final authority; the sim only predicts): max 8 stations, names ≤ 7 chars,
+exactly one PICK station (its sensors are fixed), `HOME` and the pick station can't be deleted. Each station's
+grip pose and the vertical line up to its approach (60 mm higher, never below `SAFE_Z`) must be reachable
+with the gripper vertical, not singular, within joint limits (base −90…+90° unless PARK), above the table,
+clear of the base column, ≥ 80 mm from other pick/bin stations, bins with a drop ≥ 70 mm. The v2 design
+keeps every motor ≤ 70 % of its torque in the worst pose (arm stretched horizontally), so a pose that passes
+these checks is also torque-safe. Edits are accepted only in TEACH and stay in RAM until `ST COMMIT`.
+Commands and reasons: [docs/serial_protocol.md](docs/serial_protocol.md#workcell-layout-st-commands).
 
 ## Teach mode in 30 seconds
 Enter TEACH → jog the open gripper around a cube in the cradle → **Save CUBE** → same for BIN_A,
-BIN_B, HOME → CAL RED / CAL BLUE / CAL EMPTY with the cube on the sensor → Leave TEACH → RUN.
+BIN_B, HOME (any other station too) → CAL RED / CAL BLUE / CAL EMPTY with the cube on the sensor → Leave TEACH → RUN.
 Walkthrough and bench test checklist: [docs/teach_mode.md](docs/teach_mode.md).
 
 ## Folder map
@@ -93,16 +124,16 @@ Walkthrough and bench test checklist: [docs/teach_mode.md](docs/teach_mode.md).
 firmware/            PlatformIO project (env uno, env native)
   src/config.h       every number: pins, geometry, limits, speeds, timings, decision defaults
   src/1_hal … 6_app  the six layers
-  test/test_arm/     fake robot (hal_fake.c) + Unity tests + generated IK vectors
+  test/test_arm/     fake robot (hal_fake.c) + Unity tests + generated IK / station vectors
 pysim/               PyBullet physics sim: URDF from config.h, Python firmware twin, vision sort, keyframes,
                      GUI + console, pytest (CI job pysim)
 sim/                 Vite + React 18 + TypeScript + react-three-fiber + zustand
   src/link/          ArmLink interface, SerialLink (Web Serial), VirtualLink, protocol.ts
-  src/core/          kinematics.ts (port of the C IK), virtualFirmware.ts (FSM + motion twin)
+  src/core/          kinematics.ts (port of the C IK), stations.ts (station table + validation), virtualFirmware.ts
   src/scene/         3D workcell, arm, cube, sensors
   src/panels/        UI panels
 docs/                architecture, state machine, kinematics, wiring, protocol, teach mode, decisions
-tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/L2 torque sweep)
+tools/               ik_reference.py (golden IK + station vectors), link_length_sweep.py (L1/L2 torque sweep)
 .github/workflows/   CI: build uno, native tests, sim tests + build
 ```
 

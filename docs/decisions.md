@@ -10,6 +10,7 @@ put the final value in `config.h`). The twin (`virtualFirmware.ts`) implements t
 | R2 | **Colour**: normalise by brightness (r/c, g/c, b/c), nearest calibrated colour, only if `d_best < confident_ratio × d_other` | `confident_ratio`; refs from `CAL RED` / `CAL BLUE` | 0.67 |
 | R3 | **2-colour trick**: only red and blue exist. If R2 is unsure, compare with the last *confirmed* cube: within `same_as_last` → same colour, else the other | `use_last_trick` (1/0), `same_as_last` | 1, 0.08 |
 | R4 | **Unknown**: re-read, `COLOUR_TRIES` readings in total, then ERROR | `COLOUR_TRIES` (config.h) | 3 |
+| R4b | **Reject bin**: still unknown after R4 and a bin is mapped to UNKNOWN (`ST MAP UNKNOWN <bin>`) → sort it there instead of ERROR. A colour mapped to no bin (`ST MAP RED -`) is treated as unknown. `decide_unknown_target()` | `ST MAP` (EEPROM) | none |
 | R5 | **Pick OK**: IR beam clear **and** colour sensor EMPTY (both must agree) | — | — |
 | R6 | **Retries**: extra picks after a failed VERIFY, then ERROR | `pick_retries` | 2 |
 | R7 | **Jiggle**: retry n shifts the grip point: 1 → (+mm, 0, +deg), 2 → (−mm, 0, −deg), 3 → (0, +mm), 4 → (0, −mm) | `jiggle_mm`, `jiggle_deg` | 3 mm, 4° |

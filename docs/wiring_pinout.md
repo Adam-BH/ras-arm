@@ -34,8 +34,11 @@ Trim each servo with `SERVO_CENTER_US` / `SERVO_US_PER_UNIT` (sign = direction).
 | Joint | Motor | Drive | Microstep (shield jumpers) | Steps / joint ° |
 |---|---|---|---|---|
 | J1 base | 17HS4401 | direct | 1/16 | 8.89 |
-| J2 shoulder | 17HS4401S + PG518 (5.18:1) | + GT2 belt 16T → 48T (×3) | 1/8 | 69.07 |
-| J3 elbow | 17HS4401 (on the J2 axis) | GT2 belt 16T → 80T (×5) | 1/8 | 22.22 |
+| J2 shoulder | 17HS4401S + PG518 (5.18:1) | + GT2 belt 16T → 88T (×5.5, v2) | 1/8 ⚠ | 126.6 |
+| J3 elbow | 17HS4401 (on the J2 axis) | GT2 belt 16T → 104T (×6.5, v2) | 1/8 ⚠ | 28.9 |
+
+⚠ TEAM TO CONFIRM: the v2 report assumes 1/16 on J2/J3. Change `MICROSTEP_J2/J3` in `config.h` **and** the
+shield jumpers together; steps/° doubles (J2 at 60 °/s would then need ~15 k steps/s of the 20 kHz ISR).
 
 A motor turning the wrong way: flip `DIR_SIGN_Jn` in `config.h` (or swap one coil pair).
 

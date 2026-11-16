@@ -2,7 +2,7 @@
 
 Code: `firmware/src/4_motion/kinematics.c`, ported line for line to `sim/src/core/kinematics.ts`.
 Both are tested against the same float64 reference vectors from `tools/ik_reference.py`
-(632 poses, C and TS must agree within 0.05° and 0.1 mm).
+(619 poses, C and TS must agree within 0.05° and 0.1 mm).
 
 ## Conventions
 - **World frame**: origin on the base axis at table level. **x** forward (toward the cradle), **y** left, **z** up.
@@ -11,7 +11,7 @@ Both are tested against the same float64 reference vectors from `tools/ik_refere
 - **J3** elbow bend **relative to the upper arm**, 0 = straight.
 - **J4** forearm roll (0 for picking), **J5** wrist pitch, **J6** wrist roll.
 - The gripper is kept **vertical** (pointing down): J2 + J3 + J5 = 180°.
-- Lengths: L1 = 180 (shoulder → elbow), L2 = 140 (elbow → wrist), L3 = 110 (wrist → tip), shoulder height H = 120 mm.
+- Lengths (v2 design): L1 = 165 (shoulder → elbow), L2 = 165 (elbow → wrist), L3 = 110 (wrist → tip), shoulder height H = 120 mm.
 
 ## Inverse kinematics (tip pose → joints)
 Because the tool is vertical, the wrist sits L3 straight above the tip. That leaves a base yaw plus a
@@ -40,21 +40,28 @@ z_w = L1·cos J2 + L2·cos(J2 + J3)
 x = r·cos J1,  y = r·sin J1,  z = z_w + H − L3,  roll = J6 + J1
 ```
 
-## Stations (all reachable, tested)
-| Pose | x, y, z (mm) | J1 / J2 / J3 / J5 / J6 (deg) |
-|---|---|---|
-| HOME | 160, 0, 170 | 0 / 6.8 / 90.9 / 82.3 / 0 |
-| CUBE (grip) | 220, 0, 24 | 0 / 47.0 / 93.9 / 39.1 / 0 |
-| BIN A drop | 0, 220, 78 | 90 / 35.4 / 88.8 / 55.8 / −90 |
-| BIN B drop | 0, −220, 78 | −90 / 35.4 / 88.8 / 55.8 / +90 |
+## CAD default stations (all valid with the v2 lengths, tested)
+The layout is data (README → Configurable workcell); these are the first-boot / `ST FACTORY` values.
 
-⚠ At the bins J6 sits exactly on its ±90° limit (roll 0 in world yaw). A taught bin pose with a
-roll that pushes J6 past ±90° is refused (`ERR … unreachable`); widen the J6 range in `config.h` if the
-servo allows it, or teach the bins with roll 0.
+| Station | x, y, z (mm), roll | J1 / J2 / J3 / J5 / J6 (deg) |
+|---|---|---|
+| HOME | 160, 0, 170, 0 | 0 / −1.7 / 93.4 / 88.3 / 0 |
+| CUBE (grip) | 220, 0, 24, 0 | 0 / 38.3 / 96.2 / 45.6 / 0 |
+| CUBE approach | 220, 0, 110 | 0 / 22.6 / 85.8 / 71.5 / 0 |
+| BIN_A drop | 0, 220, 78, 90 | 90 / 27.1 / 91.5 / 61.4 / 0 |
+| BIN_A approach | 0, 220, 138, 90 | 90 / 20.3 / 79.1 / 80.7 / 0 |
+| BIN_B drop | 0, −220, 78, −90 | −90 / 27.1 / 91.5 / 61.4 / 0 |
+
+Bins use roll = ±90 so J6 = roll − J1 = 0 (fingers tangent to the base, mid-range).
+⚠ With the v2 lengths **J5 (max 100°) limits high poses**: the tool stays vertical, so J5 = 180 − J2 − J3
+grows as the tip rises close to the base. Example: a station at (160, 0, 150) is fine, but its approach
+60 mm higher needs J5 ≈ 102° and is refused (`LIMIT`). Keep pick/bin stations low; the reach shading in
+the sim shows where they can go.
 
 ## Steps per joint degree
-`200 steps × microstep × ratio / 360`: J1 = 200·16/360 ≈ 8.89 · J2 = 200·8·5.18·3/360 ≈ 69.07 ·
-J3 = 200·8·5/360 ≈ 22.22. Servos: `µs = centre + value × µs_per_unit` (`config.h`; 270° DS3218 ≈ 7.41 µs/°,
+`200 steps × microstep × ratio / 360` (`MICROSTEP_Jn`, `RATIO_*` in `config.h`): J1 = 200·16/360 ≈ 8.89 ·
+J2 = 200·8·5.18·(88/16)/360 ≈ 126.6 · J3 = 200·8·(104/16)/360 ≈ 28.9. The J1 trapezoid is also capped at
+`BASE_MAX_ACC_DPS2` = 143 °/s² (2.5 rad/s²): a 90° base swing takes ≥ 1.83 s. Servos: `µs = centre + value × µs_per_unit` (`config.h`; 270° DS3218 ≈ 7.41 µs/°,
 180° MG996 ≈ 11.1 µs/°, gripper 20 µs/mm from 1000 µs closed).
 
 ## Straight lines

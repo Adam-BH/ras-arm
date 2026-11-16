@@ -1,8 +1,9 @@
 # Teach mode
 
-Teach the four poses the cycle uses (`HOME`, `CUBE`, `BIN_A`, `BIN_B`) on the real arm instead of
-trusting the CAD numbers. Poses are stored in EEPROM with a CRC and survive power cycles; a blank or
-corrupt EEPROM falls back to the CAD layout.
+Touch up the workcell stations (`HOME`, `CUBE`, `BIN_A`, `BIN_B`, and any you added, e.g. `REJECT`) on the
+real arm instead of trusting the CAD numbers or the sim layout. Stations live in a table stored in EEPROM
+with a CRC; a blank, corrupt or old-format EEPROM falls back to the CAD layout. Every station is validated
+by the firmware (`ERR SAVE LIMIT`, `ERR ST TOO_CLOSE`…, see [serial_protocol.md](serial_protocol.md)).
 
 ## With the React app (recommended)
 1. `cd sim && npm i && npm run dev`, open the page in **Chrome or Edge** (Web Serial).
@@ -12,7 +13,9 @@ corrupt EEPROM falls back to the CAD layout.
 4. Jog with X±/Y±/Z±/Roll± (step 10 / 1 / 0.2 mm), or per joint with J1…J6/Grip −/+.
    Each click sends one `JOG`/`JOGJ`; a click while the arm still moves answers `ERR JOG busy`. Just click again.
 5. Put a cube in the cradle, jog the open fingers around it at grip height → **Save** on the `CUBE` row.
-6. Same for `BIN_A` (red bin), `BIN_B` (blue bin), `HOME`. **Go** checks a pose.
+6. Same for `BIN_A` (red bin), `BIN_B` (blue bin), `HOME`. **Go** checks a pose, **Preview** comes down onto
+   it slowly from its approach height. `SAVE` commits at once; **Add station here** + **Commit** creates new ones.
+   The colour → bin dropdowns change the map on the arm (`ST MAP`).
 7. Colour calibration, cube on the sensor: **CAL RED**, **CAL BLUE**, empty cradle **CAL EMPTY**.
 8. **Leave TEACH** → Run panel → **RUN**.
 
@@ -24,7 +27,10 @@ JOG 0 0 -10
 JOG 2 0 0
 SAVE CUBE
 GO HOME
-POSES
+ST ADD REJECT BIN
+ST MAP UNKNOWN REJECT
+ST COMMIT
+ST LIST
 CAL RED
 DONE
 ```

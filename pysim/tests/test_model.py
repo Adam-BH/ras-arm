@@ -12,11 +12,11 @@ from ras_sim.world import World
 
 
 def test_config_h_parsed():
-    assert (FW.L1, FW.L2, FW.L3, FW.H_SHOULDER) == (180, 140, 110, 120)
+    assert (FW.L1, FW.L2, FW.L3, FW.H_SHOULDER) == (165, 165, 110, 120)          # v2 design
     assert FW.JOINT_MIN == [-100, -20, 20, -90, -100, -90, 0]
     assert FW.JOINT_MAX == [100, 110, 150, 90, 100, 90, 50]
     assert FW.HOME_SWITCH_DEG == [-100, -20, 150] and FW.HOME_DIR == [-1, -1, 1]
-    assert FW.SPD_J2 == pytest.approx(69.07, abs=0.01)
+    assert FW.SPD_J2 == pytest.approx(126.62, abs=0.01)                          # 5.18 × 88/16, 1/8
     assert FW.HOMING_SLOW_MAX == FW.HOMING_BACKOFF + 3
     assert FW.PIN_LIMIT_J3 == 11                                   # the #ifndef branch
     assert (FW.J1, FW.JG, FW.NJ) == (0, 6, 7)
