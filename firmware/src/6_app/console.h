@@ -3,7 +3,8 @@
 //   OK <CMD> [data]   or   ERR <CMD> <reason>
 // Moves also send "DONE <CMD>" when they finish. Events: "EV <what> [arg] [n]".
 // Telemetry (20 Hz, integers only):
-//   T,<ms>,<state>,<j1..j6 ×10>,<grip ×10>,<x>,<y>,<z>,<ir>,<colour>,<err>,<lim1><lim2><lim3>,<estop>
+//   T,<ms>,<state>,<j1..j6 ×10>,<grip ×10>,<x>,<y>,<z>,<ir>,<colour>,<err>,<lim1><lim2><lim3>,<estop>,<layout>
+//   layout = station table version (+1 per ST COMMIT): re-read ST LIST when it changes
 #pragma once
 #include "../config.h"
 

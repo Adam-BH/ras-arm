@@ -15,6 +15,7 @@ void    *decide_cal_data(uint16_t *len);                         // calibration 
 typedef enum { ON_UNKNOWN_ERROR, ON_UNKNOWN_RETRY_THEN_ERROR } unknown_policy_t;
 unknown_policy_t decide_on_unknown(void);
 uint8_t  decide_colour_tries(void);                              // reads before giving up
+int8_t   decide_unknown_target(int8_t reject_bin);               // after the tries: bin index, or -1 = ERROR
 
 // ── gripping ──
 uint8_t decide_max_pick_attempts(void);

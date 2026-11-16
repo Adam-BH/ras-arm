@@ -447,6 +447,92 @@ void test_estop_from_pick(void) {
   assert_counters_match_motors();
 }
 
+// ════════════════════ configurable workcell over serial ════════════════════
+static int tel_field(int k) {                              // k-th field of the latest telemetry line
+  char line[128]; strcpy(line, fake_last_tel);
+  char *t = strtok(line, ",\n"); for (int i = 0; i < k && t; i++) t = strtok(0, ",\n");
+  return t ? atoi(t) : -999;
+}
+void test_st_protocol(void) {
+  TEST_ASSERT_TRUE(boot(20, 40, 90));
+  const char *l = cmd("ST LIST");                          // allowed in any state
+  TEST_ASSERT_NOT_NULL(strstr(l, "ST,0,HOME,PARK,160,0,170,0,60\n"));
+  TEST_ASSERT_NOT_NULL(strstr(l, "ST,1,CUBE,PICK,220,0,24,0,60\n"));
+  TEST_ASSERT_NOT_NULL(strstr(l, "ST,3,BIN_B,BIN,0,-220,78,-90,60\n"));
+  TEST_ASSERT_NOT_NULL(strstr(l, "MAP,RED,BIN_A\nMAP,BLUE,BIN_B\nMAP,UNKNOWN,-\nOK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET REJECT 150 150 80 45"), "ERR ST NOT_TEACH"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST"), "ERR ST args"));
+  cmd("TEACH");
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET REJECT 150 150 80 45"), "OK ST"));       // create (BIN)
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET REJECT 150 150 85 45 50"), "OK ST"));    // move + above_dz
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST LIST"), "ST,4,REJECT,BIN,150,150,85,45,50"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET FAR 600 0 80 0"), "ERR ST UNREACHABLE"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET P2 250 0 150 0 60 PARK"), "OK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET X 1 2 3 4 5 ROBOT"), "ERR ST args"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET X 1 two 3 4"), "ERR ST args"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST DEL HOME"), "ERR ST PROTECTED"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST DEL CUBE"), "ERR ST PROTECTED"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST DEL P2"), "OK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST DEL P2"), "ERR ST NAME"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("st map unknown reject"), "OK ST"));             // case-insensitive
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST MAP GREEN REJECT"), "ERR ST NAME"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST MAP RED HOME"), "ERR ST NAME"));             // not a bin
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST GO REJECT"), "OK ST"));                       // preview: above, then down
+  TEST_ASSERT_TRUE(run_until_log("DONE ST", 15000));
+  pose_t p; motion_where(&p);
+  TEST_ASSERT_FLOAT_WITHIN(0.6f, 150, p.x); TEST_ASSERT_FLOAT_WITHIN(0.6f, 150, p.y); TEST_ASSERT_FLOAT_WITHIN(0.6f, 85, p.z);
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST ADD HERE BIN"), "ERR ST TOO_CLOSE"));        // teach on the arm: right on REJECT
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST ADD HERE PARK"), "OK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("DONE"), "EV WARN uncommitted_layout"));
+  cmd("TEACH");
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST COMMIT"), "OK ST"));
+  run_ms(60); TEST_ASSERT_EQUAL(1, tel_field(18));         // the sim sees the new layout version
+  TEST_ASSERT_NULL(strstr(cmd("DONE"), "WARN"));
+  cmd("TEACH");
+  cmd("ST FACTORY");
+  TEST_ASSERT_NULL(strstr(cmd("ST LIST"), "REJECT"));
+  cmd("ST REVERT");                                        // back to the committed layout
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST LIST"), "MAP,UNKNOWN,REJECT"));
+  fake_reset(0, 30, 90); fsm_init();                       // survives a reboot
+  TEST_ASSERT_EQUAL(6, stations_count());
+}
+static bool run_until_return(float *y) {                   // run a cycle; tip y when the drop finished
+  if (!run_until(ST_VERIFY, 30000)) return false;
+  fake_ir_blocked = false; fake_rgbc = EMPTY;              // the cube left the cradle
+  if (!run_until(ST_RETURN, 30000)) return false;
+  pose_t p; motion_where(&p); *y = p.y;
+  return run_until(ST_IDLE, 30000);
+}
+void test_swapped_bins(void) {
+  TEST_ASSERT_TRUE(boot(20, 40, 90));
+  cmd("TEACH");
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST MAP RED BIN_B"), "OK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST MAP BLUE BIN_A"), "OK ST"));
+  cmd("ST COMMIT"); cmd("DONE");
+  fake_rgbc = RED; fake_ir_blocked = true; fake_clear_log();
+  cmd("RUN");
+  float y = 0; TEST_ASSERT_TRUE(run_until_return(&y));
+  TEST_ASSERT_LESS_THAN_FLOAT(-200.0f, y);                 // red went to BIN_B (−y)
+  TEST_ASSERT_NOT_NULL(strstr(fake_log, "EV PLACED RED"));
+  cmd("STOP");
+}
+void test_reject_bin(void) {
+  TEST_ASSERT_TRUE(boot(20, 40, 90));
+  cmd("TEACH");
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST SET REJECT 150 150 80 45"), "OK ST"));
+  TEST_ASSERT_NOT_NULL(strstr(cmd("ST MAP UNKNOWN REJECT"), "OK ST"));
+  cmd("ST COMMIT"); cmd("DONE");
+  rgbc_t purple = {380, 210, 360, 920};                    // neither red nor blue
+  fake_rgbc = purple; fake_ir_blocked = true; fake_clear_log();
+  cmd("RUN");
+  float y = 0; TEST_ASSERT_TRUE(run_until_return(&y));
+  TEST_ASSERT_FLOAT_WITHIN(1.0f, 150, y);                  // dropped into REJECT
+  TEST_ASSERT_NOT_NULL(strstr(fake_log, "EV COLOUR UNKNOWN"));
+  TEST_ASSERT_NOT_NULL(strstr(fake_log, "EV PLACED UNKNOWN"));
+  TEST_ASSERT_EQUAL(E_NONE, fsm_error());
+  cmd("STOP");
+}
+
 // ════════════════════ protocol ════════════════════
 void test_every_command_one_reply(void) {
   TEST_ASSERT_TRUE(boot(0, 30, 90));
@@ -460,6 +546,7 @@ void test_every_command_one_reply(void) {
     {"DONE", "DONE"}, {"RESET", "RESET"}, {"TEACH", "TEACH"},
     {"JOG 1 0 0", "JOG"}, {"STOP", "STOP"}, {"JOGJ 9 5", "JOGJ"}, {"SAVE NOWHERE", "SAVE"}, {"CAL GREEN", "CAL"},
     {"SAVE BIN_A", "SAVE"}, {"RUN", "RUN"}, {"TEACH", "TEACH"}, {"DONE", "DONE"}, {"RUN", "RUN"}, {"STOP", "STOP"},
+    {"ST LIST", "ST"}, {"ST", "ST"}, {"ST FOO", "ST"}, {"ST DEL HOME", "ST"},
     {"HOME", "HOME"}, {"HOME", "HOME"} /* already homing */,
   };
   for (unsigned i = 0; i < sizeof lines / sizeof lines[0]; i++) {
@@ -481,7 +568,7 @@ void test_telemetry_format(void) {
   TEST_ASSERT_EQUAL_CHAR('\n', line[strlen(line) - 1]);
   char *f[32]; int n = 0;
   for (char *t = strtok(line, ",\n"); t && n < 32; t = strtok(0, ",\n")) f[n++] = t;
-  TEST_ASSERT_EQUAL(18, n);                                // T ms state j1..j6 grip x y z ir col err lim estop
+  TEST_ASSERT_EQUAL(19, n);                                // T ms state j1..j6 grip x y z ir col err lim estop layout
   TEST_ASSERT_EQUAL_STRING("IDLE", f[2]);
   TEST_ASSERT_INT_WITHIN(5, (int)(GRIP_OPEN_MM * 10), atoi(f[9]));
   TEST_ASSERT_INT_WITHIN(1, (int)CELL_HOME_X, atoi(f[10]));
@@ -490,6 +577,7 @@ void test_telemetry_format(void) {
   TEST_ASSERT_EQUAL_STRING("0", f[15]);                    // no error
   TEST_ASSERT_EQUAL(3, (int)strlen(f[16]));                // three limit switch digits
   TEST_ASSERT_EQUAL_STRING("0", f[17]);                    // power OK
+  TEST_ASSERT_EQUAL_STRING("0", f[18]);                    // layout version: blank EEPROM, never committed
   for (int i = 3; i < 16; i++) { char *e; strtol(f[i], &e, 10); TEST_ASSERT_EQUAL_CHAR(0, *e); }   // integers only
 }
 
@@ -522,5 +610,8 @@ int main(void) {
   RUN_TEST(test_estop_from_pick);
   RUN_TEST(test_every_command_one_reply);
   RUN_TEST(test_telemetry_format);
+  RUN_TEST(test_st_protocol);
+  RUN_TEST(test_swapped_bins);
+  RUN_TEST(test_reject_bin);
   return UNITY_END();
 }

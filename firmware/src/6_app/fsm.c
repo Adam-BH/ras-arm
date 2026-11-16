@@ -18,8 +18,6 @@ static colour_t    cube_colour = COL_UNKNOWN, last_colour = COL_UNKNOWN, cal_tar
 static rgbc_t      cube_rgbc;
 static uint32_t    t_enter;
 
-#define COLOUR_NAMES "EMPTY\0RED\0BLUE\0UNKNOWN"
-
 state_t     fsm_state(void)       { return st; }
 fsm_error_t fsm_error(void)       { return err; }
 bool        fsm_homed(void)       { return homed; }
@@ -96,13 +94,13 @@ void fsm_tick(uint32_t now) {
     case ST_READ_COLOUR:
       if (task_colour_update(now, &c, &avg) != TASK_DONE) break;
       last_colour = c;
-      if (c == COL_RED || c == COL_BLUE) {
-        cube_colour = c; cube_rgbc = avg;
-        console_event(PSTR("COLOUR"), flash_nth(PSTR(COLOUR_NAMES), c), -1);
-        enter(ST_PICK, now);
-      }
-      else if (++colour_tries < decide_colour_tries() && decide_on_unknown() != ON_UNKNOWN_ERROR) task_colour_start();
-      else fail(E_COLOUR_UNKNOWN, now);
+      if ((c == COL_RED || c == COL_BLUE) && stations_bin_for(c) >= 0) cube_colour = c;
+      else if (++colour_tries < decide_colour_tries() && decide_on_unknown() != ON_UNKNOWN_ERROR) { task_colour_start(); break; }
+      else if (decide_unknown_target(stations_bin_for(COL_UNKNOWN)) >= 0) cube_colour = COL_UNKNOWN;   // → reject bin
+      else { fail(E_COLOUR_UNKNOWN, now); break; }
+      cube_rgbc = avg;
+      console_event(PSTR("COLOUR"), flash_nth(PSTR(COLOUR_NAMES), cube_colour), -1);
+      enter(ST_PICK, now);
       break;
 
     case ST_PICK:

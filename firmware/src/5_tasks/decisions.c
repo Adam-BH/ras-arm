@@ -9,7 +9,9 @@
 //                is clearly closer: d_best < confident_ratio × d_other.
 //  R3 2-COLOUR   only red and blue exist. If R2 is unsure and use_last_trick = 1, compare with
 //                the last CONFIRMED cube: within same_as_last → same colour, else the other one.
-//  R4 UNKNOWN    retry the reading, COLOUR_TRIES times in total, then ERROR.
+//  R4 UNKNOWN    retry the reading, COLOUR_TRIES times in total, then ERROR…
+//  R4b REJECT    …unless a reject bin is mapped (ST MAP UNKNOWN <bin>): then the cube goes there.
+//                A colour mapped to no bin ("ST MAP RED -") is handled like an unknown one.
 //  R5 PICK OK    after a pick, the IR beam must be clear AND the colour sensor must read EMPTY.
 //                Both sensors must agree.
 //  R6 RETRIES    up to pick_retries extra picks after a failed VERIFY, then ERROR.
@@ -78,9 +80,12 @@ void decide_colour_calibrate(colour_t c, const rgbc_t *avg) {
   if (c == COL_BLUE)  cal.blue = to_chroma(avg);
 }
 
-void decide_colour_confirmed(colour_t c, const rgbc_t *avg) { last_colour = c; last_good = to_chroma(avg); }
+void decide_colour_confirmed(colour_t c, const rgbc_t *avg) {      // rejects don't teach the R3 trick
+  if (c == COL_RED || c == COL_BLUE) { last_colour = c; last_good = to_chroma(avg); }
+}
 
 unknown_policy_t decide_on_unknown(void)   { return ON_UNKNOWN_RETRY_THEN_ERROR; }      // R4
+int8_t decide_unknown_target(int8_t reject_bin) { return reject_bin >= 0 ? reject_bin : -1; }   // R4b
 uint8_t          decide_colour_tries(void) { return COLOUR_TRIES; }
 
 // ════════════════════════ GRIPPING ════════════════════════

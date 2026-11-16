@@ -10,10 +10,11 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define COMMANDS "PING\0STATUS\0HOME\0RUN\0STOP\0RESET\0TEACH\0DONE\0MOVE\0LINE\0MOVEJ\0JOG\0JOGJ\0GRIP\0SAVE\0GO\0POSES\0CAL\0SET"
+#define COMMANDS "PING\0STATUS\0HOME\0RUN\0STOP\0RESET\0TEACH\0DONE\0MOVE\0LINE\0MOVEJ\0JOG\0JOGJ\0GRIP\0SAVE\0GO\0POSES\0CAL\0SET\0ST"
 enum { C_PING, C_STATUS, C_HOME, C_RUN, C_STOP, C_RESET, C_TEACH, C_DONE, C_MOVE, C_LINE, C_MOVEJ,
-       C_JOG, C_JOGJ, C_GRIP, C_SAVE, C_GO, C_POSES, C_CAL, C_SET, C_COUNT };
-#define CAL_NAMES "EMPTY\0RED\0BLUE"
+       C_JOG, C_JOGJ, C_GRIP, C_SAVE, C_GO, C_POSES, C_CAL, C_SET, C_ST, C_COUNT };
+#define ST_SUBS "LIST\0ADD\0SET\0DEL\0MAP\0GO\0COMMIT\0REVERT\0FACTORY"
+enum { S_LIST, S_ADD, S_SET, S_DEL, S_MAP, S_GO, S_COMMIT, S_REVERT, S_FACTORY, S_COUNT };
 #define MAX_ARGS 8
 #define OUT_MAX  104
 
@@ -60,6 +61,70 @@ static bool num(const char *s, float *v) {
 }
 
 static void upcase(char *s) { for (; *s; s++) if (*s >= 'a' && *s <= 'z') *s -= 'a' - 'A'; }
+
+static void o_t(int16_t tenths) { o_c(','); o_i((tenths + (tenths < 0 ? -5 : 5)) / 10); }   // 0.1 → integer
+
+// ST LIST: "ST,<i>,<name>,<type>,<x>,<y>,<z>,<roll>,<above_dz>" per station, "MAP,<colour>,<name|->" per colour
+static void st_list(void) {
+  for (uint8_t i = 0; i < stations_count(); i++) {
+    const station_t *s = stations_get(i);
+    on = 0; o_p(PSTR("ST,")); o_i(i); o_c(','); o_s(s->name); o_c(','); o_p(flash_nth(PSTR(STATION_TYPES), s->type));
+    o_t(s->x); o_t(s->y); o_t(s->z); o_t(s->roll); o_c(','); o_i(s->above_dz); o_send();
+  }
+  for (uint8_t c = COL_RED; c < N_COLOURS; c++) {
+    int8_t b = stations_bin_for((colour_t)c);
+    on = 0; o_p(PSTR("MAP,")); o_p(flash_nth(PSTR(COLOUR_NAMES), c)); o_c(',');
+    if (b < 0) o_c('-'); else o_s(stations_get((uint8_t)b)->name);
+    o_send();
+  }
+}
+
+// ST <sub> …: layout edits (TEACH only, RAM until ST COMMIT). Returns a station reason (0 = OK),
+// or 0xFF = bad arguments. *r = FSM reply for ST GO (a move).
+#define ST_ARGS 0xFF
+static uint8_t st_command(char **tok, uint8_t argc, fsm_reply_t *r) {
+  for (uint8_t k = 1; k <= argc; k++) upcase(tok[k]);
+  int8_t sc = flash_find(PSTR(ST_SUBS), S_COUNT, tok[1]);
+  if (sc < 0) return ST_ARGS;
+  if (sc == S_LIST) { st_list(); return STE_OK; }
+  if (!fsm_teaching()) return STE_NOT_TEACH;
+  int8_t i = argc >= 2 ? stations_find(tok[2]) : -1;
+  switch (sc) {
+    case S_ADD: {                                              // ST ADD <name> <type>: here
+      int8_t t = argc == 3 ? flash_find(PSTR(STATION_TYPES), 3, tok[3]) : -1;
+      if (t < 0) return ST_ARGS;
+      pose_t p; task_where(&p);
+      return stations_add(tok[2], (uint8_t)t, &p, STATION_ABOVE_DZ); }
+    case S_SET: {                                              // ST SET <name> x y z roll [above_dz [type]]
+      float v[5];
+      if (argc < 6 || argc > 8) return ST_ARGS;
+      for (uint8_t k = 0; k < 5 && k + 3 <= argc; k++) if (!num(tok[k + 3], &v[k])) return ST_ARGS;
+      pose_t p = {v[0], v[1], v[2], v[3]};
+      int16_t dz = argc >= 7 ? (int16_t)v[4] : i >= 0 ? stations_get((uint8_t)i)->above_dz : STATION_ABOVE_DZ;
+      if (i >= 0) return stations_set((uint8_t)i, &p, dz);      // move (type unchanged)
+      int8_t t = argc == 8 ? flash_find(PSTR(STATION_TYPES), 3, tok[8]) : STN_BIN;
+      if (t < 0) return ST_ARGS;
+      return stations_add(tok[2], (uint8_t)t, &p, dz); }        // create
+    case S_DEL:
+      if (argc != 2) return ST_ARGS;
+      return i < 0 ? STE_NAME : stations_delete((uint8_t)i);
+    case S_MAP: {                                              // ST MAP <RED|BLUE|UNKNOWN> <name|->
+      if (argc != 3) return ST_ARGS;
+      int8_t c = flash_find(PSTR(COLOUR_NAMES), N_COLOURS, tok[2]);
+      int8_t b = strcmp(tok[3], "-") ? stations_find(tok[3]) : -1;
+      if (c <= COL_EMPTY || (b < 0 && strcmp(tok[3], "-"))) return STE_NAME;
+      return stations_map((colour_t)c, b); }
+    case S_GO:
+      if (argc != 2) return ST_ARGS;
+      if (i < 0) return STE_NAME;
+      *r = fsm_preview((uint8_t)i);
+      return STE_OK;
+    case S_COMMIT:  stations_commit();  return STE_OK;
+    case S_REVERT:  stations_revert();  return STE_OK;
+    case S_FACTORY: stations_factory(); return STE_OK;         // still needs ST COMMIT
+  }
+  return ST_ARGS;
+}
 
 static void handle(char *line, uint32_t now) {
   char *tok[MAX_ARGS + 1]; uint8_t n = 0;
@@ -127,7 +192,7 @@ static void handle(char *line, uint32_t now) {
     case C_CAL: {
       if (argc != 1) { err_reply(cmd, PSTR("args")); return; }
       upcase(tok[1]);
-      int8_t col = flash_find(PSTR(CAL_NAMES), 3, tok[1]);     // index = colour_t
+      int8_t col = flash_find(PSTR(COLOUR_NAMES), 3, tok[1]);  // EMPTY RED BLUE, index = colour_t
       if (col < 0) { err_reply(cmd, PSTR("args")); return; }
       r = fsm_calibrate((colour_t)col); is_move = true; break; }
     case C_SET: {
@@ -135,6 +200,12 @@ static void handle(char *line, uint32_t now) {
       if (argc != 2 || !num(tok[2], &v)) { err_reply(cmd, PSTR("args")); return; }
       r = fsm_can_tune();
       if (r == R_OK && !decide_set(tok[1], v)) { err_reply(cmd, PSTR("key")); return; }
+      break; }
+    case C_ST: {
+      uint8_t e = argc ? st_command(tok, argc, &r) : ST_ARGS;
+      if (e == ST_ARGS) { err_reply(cmd, PSTR("args")); return; }
+      if (e) { err_reply(cmd, flash_nth(PSTR(ST_ERR_NAMES), e)); return; }
+      is_move = !strcmp(tok[1], "GO");                         // st_command upcased it
       break; }
   }
   if (r != R_OK) { err_reply(cmd, r >= R_ST ? flash_nth(PSTR(ST_ERR_NAMES), r - R_ST) : flash_nth(PSTR(REPLY_REASONS), r)); return; }
@@ -150,6 +221,7 @@ static void telemetry(uint32_t now) {
   o_c(','); o_i(ir_object()); o_c(','); o_i(fsm_last_colour()); o_c(','); o_i(fsm_error()); o_c(',');
   for (uint8_t i = 0; i < N_STEPPERS; i++) o_c(limit_pressed(i) ? '1' : '0');
   o_c(','); o_i(estop_active());
+  o_c(','); o_i(stations_layout_version());
   o_send();
 }
 
