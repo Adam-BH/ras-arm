@@ -94,6 +94,8 @@ firmware/            PlatformIO project (env uno, env native)
   src/config.h       every number: pins, geometry, limits, speeds, timings, decision defaults
   src/1_hal … 6_app  the six layers
   test/test_arm/     fake robot (hal_fake.c) + Unity tests + generated IK vectors
+pysim/               PyBullet physics sim: URDF from config.h, Python firmware twin, vision sort, keyframes,
+                     GUI + console, pytest (CI job pysim)
 sim/                 Vite + React 18 + TypeScript + react-three-fiber + zustand
   src/link/          ArmLink interface, SerialLink (Web Serial), VirtualLink, protocol.ts
   src/core/          kinematics.ts (port of the C IK), virtualFirmware.ts (FSM + motion twin)
@@ -107,5 +109,21 @@ tools/               ik_reference.py (golden vectors), link_length_sweep.py (L1/
 ## Kinematics, decisions
 - IK/FK with the gripper kept vertical, conventions and stations: [docs/kinematics.md](docs/kinematics.md)
 - Every decision rule (colour, 2-colour trick, jiggle, wiggle, pick-OK, re-home) and its parameter: [docs/decisions.md](docs/decisions.md)
+
+## Physics simulation (pysim/)
+The cell in PyBullet: the arm generated from `config.h`, real cubes with mass and friction, steppers that
+can lose steps, servos, NC switches, the IR beam, a TCS34725 model, an E-stop that makes the arm go limp, and
+a Python twin of the firmware (same states, decisions and protocol) driving it. Grasps, slips and drops are
+physics, not script. On top, over the normal protocol: the RUN cycle with a cradle feeder, a vision sort
+(overhead camera → OpenCV HSV → depth unprojection → pick anywhere on the table), and an ICRA-style keyframe player.
+```bash
+cd pysim && pip install -r requirements.txt
+python run_sim.py                      # window with buttons + protocol console (!help)
+python run_sim.py demo --headless      # RUN cycle, vision sort, keyframes; exit 1 if a cube ends up wrong
+pytest tests                           # 21 tests: model vs firmware, the cycle and its faults, vision
+```
+Details, the sensor models and what the physics found: [pysim/README.md](pysim/README.md).
+
+<img src="docs/img/pysim-workcell.png" width="620" alt="PyBullet workcell: the arm lifting a blue cube out of the cradle">
 
 MIT licence.
