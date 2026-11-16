@@ -14,6 +14,7 @@ export function VirtualControls() {
       <div className="row">
         <button className="red" disabled={!!w.cube} onClick={() => poke(() => fw.placeCube('RED'))}>Place red cube</button>
         <button className="blue" disabled={!!w.cube} onClick={() => poke(() => fw.placeCube('BLUE'))}>Place blue cube</button>
+        <button disabled={!!w.cube} onClick={() => poke(() => fw.placeCube('PURPLE'))} title="neither red nor blue: goes to the bin mapped to UNKNOWN, else ERROR">Place unknown cube</button>
         <button disabled={w.cube?.where !== 'cradle'} onClick={() => poke(() => fw.removeCube())}>Remove</button>
       </div>
       <div className="row">
@@ -26,7 +27,7 @@ export function VirtualControls() {
           <label key={j} className="check"><input type="checkbox" checked={w.brokenSwitch[j]} onChange={e => poke(() => fw.breakSwitch(j, e.target.checked))} />J{j + 1}</label>
         ))}
       </div>
-      <div className="muted small">bins: A (red) {w.bins.A} · B (blue) {w.bins.B} · cube: {w.cube ? `${w.cube.colour} in ${w.cube.where}` : 'none'}</div>
+      <div className="muted small">bins: {Object.entries(w.bins).map(([n, k]) => `${n} ${k}`).join(' · ') || 'empty'} · cube: {w.cube ? `${w.cube.colour} in ${w.cube.where}` : 'none'}</div>
     </section>
   );
 }

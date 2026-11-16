@@ -51,7 +51,7 @@ export function Arm({ joints, held }: { joints: number[]; held?: string | null }
                       {held && (
                         <mesh position={[0, 0, L3 + s / 2 - 1]}>
                           <boxGeometry args={[s, s, s]} />
-                          <meshStandardMaterial color={held === 'RED' ? '#d33' : '#2a6fdb'} />
+                          <meshStandardMaterial color={held === 'RED' ? '#d33' : held === 'BLUE' ? '#2a6fdb' : '#9b59b6'} />
                         </mesh>
                       )}
                     </Yaw>

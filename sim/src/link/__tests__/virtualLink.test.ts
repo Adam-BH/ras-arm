@@ -1,7 +1,7 @@
 // VirtualLink end to end: the UI's view of the virtual arm (commands, replies, events, telemetry).
 import { describe, expect, it } from 'vitest';
 import { VirtualLink } from '../VirtualLink';
-import type { Telemetry } from '../protocol';
+import { parseLayout, type Telemetry } from '../protocol';
 
 async function setup() {
   const link = new VirtualLink({ autoTick: false });
@@ -40,7 +40,7 @@ describe('VirtualLink', () => {
     expect(s.events).toContain('EV COLOUR BLUE');
     expect(s.events).toContain('EV PICK_RETRY 1');
     expect(s.events).toContain('EV PLACED BLUE');
-    expect(s.link.fw.world.bins).toEqual({ A: 0, B: 1 });
+    expect(s.link.fw.world.bins).toEqual({ BIN_B: 1 });
     await s.runUntil(() => s.tel()?.state === 'IDLE', 2000);
     expect(s.tel()?.state).toBe('IDLE');
   });
@@ -49,19 +49,21 @@ describe('VirtualLink', () => {
     const s = await setup();
     await s.runUntil(() => s.events.includes('EV HOMED'));
     expect((await s.send('JOG 0 0 -10')).text).toBe('state');     // TEACH only
+    expect((await s.send('MOVE 200 0 70')).ok).toBe(true);          // near the table: a pose CUBE can really have
+    expect(await s.runUntil(() => s.events.includes('DONE MOVE'))).toBe(true);
     expect((await s.send('TEACH')).ok).toBe(true);
     expect((await s.send('JOG 0 0 -20')).ok).toBe(true);
     expect((await s.send('JOG 0 0 1')).text).toBe('busy');
     expect(await s.runUntil(() => s.events.includes('DONE JOG'))).toBe(true);
     expect((await s.send('SAVE CUBE')).ok).toBe(true);
     const poses = await s.send('POSES');
-    expect(poses.data).toContain('POSE CUBE 160.0 0.0 150.0 0.0');
+    expect(poses.data).toContain('POSE CUBE 200.0 0.0 50.0 0.0');
     expect((await s.send('JOGJ 1 20')).ok).toBe(true);
     await s.runUntil(() => s.events.filter(e => e === 'DONE JOGJ').length === 1);
     expect((await s.send('GO CUBE')).ok).toBe(true);
     expect(await s.runUntil(() => s.events.includes('DONE GO'))).toBe(true);
     s.link.advance(60);
-    expect(s.tel()?.tip.z).toBeCloseTo(150, -1);
+    expect(s.tel()?.tip.z).toBeCloseTo(50, -1);
     expect((await s.send('DONE')).ok).toBe(true);
   });
 
@@ -98,6 +100,66 @@ describe('VirtualLink', () => {
     s.link.advance(60);
     expect(s.tel()?.state).toBe('ERROR');
     expect(s.tel()?.errName).toBe('HOME_FAILED');
+  });
+
+  it('workcell: ST LIST / SET / MAP / GO / COMMIT, refusals, layout version in telemetry', async () => {
+    const s = await setup();
+    await s.runUntil(() => s.events.includes('EV HOMED'));
+    const list = await s.send('ST LIST');
+    expect(list.data).toEqual(['ST,0,HOME,PARK,160,0,170,0,60', 'ST,1,CUBE,PICK,220,0,24,0,60', 'ST,2,BIN_A,BIN,0,220,78,90,60',
+      'ST,3,BIN_B,BIN,0,-220,78,-90,60', 'MAP,RED,BIN_A', 'MAP,BLUE,BIN_B', 'MAP,UNKNOWN,-']);
+    expect((await s.send('ST SET REJECT 150 150 80 45')).text).toBe('NOT_TEACH');
+    await s.send('TEACH');
+    expect((await s.send('ST SET REJECT 150 150 80 45')).ok).toBe(true);
+    expect((await s.send('ST SET FAR 600 0 80 0')).text).toBe('UNREACHABLE');
+    expect((await s.send('ST DEL HOME')).text).toBe('PROTECTED');
+    expect((await s.send('st map unknown reject')).ok).toBe(true);
+    expect((await s.send('ST GO REJECT')).ok).toBe(true);
+    expect(await s.runUntil(() => s.events.includes('DONE ST'))).toBe(true);
+    s.link.advance(60);
+    expect(s.tel()?.tip).toEqual({ x: 150, y: 150, z: 80 });
+    expect((await s.send('ST ADD HERE BIN')).text).toBe('TOO_CLOSE');
+    expect((await s.send('DONE')).ok).toBe(true);
+    expect(s.events).toContain('EV WARN uncommitted_layout');
+    await s.send('TEACH');
+    expect(s.tel()?.layout).toBe(0);
+    expect((await s.send('ST COMMIT')).ok).toBe(true);
+    s.link.advance(60);
+    expect(s.tel()?.layout).toBe(1);
+    const back = parseLayout((await s.send('ST LIST')).data);
+    expect(back.stations.map(st => st.name)).toEqual(['HOME', 'CUBE', 'BIN_A', 'BIN_B', 'REJECT']);
+    expect(back.map).toEqual({ RED: 'BIN_A', BLUE: 'BIN_B', UNKNOWN: 'REJECT' });
+  });
+
+  it('swapped bins: RED → BIN_B', async () => {
+    const s = await setup();
+    await s.runUntil(() => s.events.includes('EV HOMED'));
+    await s.send('TEACH'); await s.send('ST MAP RED BIN_B'); await s.send('ST COMMIT'); await s.send('DONE');
+    s.link.fw.placeCube('RED');
+    await s.send('RUN');
+    expect(await s.runUntil(() => s.events.includes('EV CYCLE 1'))).toBe(true);
+    expect(s.link.fw.world.bins).toEqual({ BIN_B: 1 });
+  });
+
+  it('reject bin: an unknown colour goes to REJECT; without one it is an ERROR', async () => {
+    const s = await setup();
+    await s.runUntil(() => s.events.includes('EV HOMED'));
+    await s.send('TEACH');
+    expect((await s.send('ST SET REJECT 150 150 80 45')).ok).toBe(true);
+    expect((await s.send('ST MAP UNKNOWN REJECT')).ok).toBe(true);
+    await s.send('ST COMMIT'); await s.send('DONE');
+    s.link.fw.placeCube('PURPLE');
+    await s.send('RUN');
+    expect(await s.runUntil(() => s.events.includes('EV CYCLE 1'))).toBe(true);
+    expect(s.events).toContain('EV COLOUR UNKNOWN');
+    expect(s.events).toContain('EV PLACED UNKNOWN');
+    expect(s.link.fw.world.bins).toEqual({ REJECT: 1 });
+    await s.send('STOP');
+    await s.runUntil(() => s.tel()?.state === 'IDLE', 2000);
+    await s.send('TEACH'); await s.send('ST MAP UNKNOWN -'); await s.send('DONE');
+    s.link.fw.placeCube('PURPLE');
+    await s.send('RUN');
+    expect(await s.runUntil(() => s.events.includes('EV ERROR COLOUR_UNKNOWN'))).toBe(true);
   });
 
   it('times out a command with no reply', async () => {

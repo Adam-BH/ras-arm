@@ -1,16 +1,21 @@
-// Teach mode: jog the arm (Cartesian or per joint), save/go poses, colour calibration.
+// Teach mode: jog the arm (Cartesian or per joint), save/go/preview stations, add a station here,
+// colour → bin map (live on the arm), colour calibration.
 import { useState } from 'react';
 import { useArm } from '../store/useArm';
-import { fmt, POSE_NAMES } from '../link/protocol';
+import { fmt } from '../link/protocol';
+import { MAP_COLOURS, STATION_TYPES, type StationType } from '../core/stations';
 
 const STEPS = [10, 1, 0.2];
 
 export function TeachPanel() {
-  const { send, tel, poses, refreshPoses } = useArm();
+  const { send, tel, layout, loadLayout } = useArm();
   const [step, setStep] = useState(1);
+  const [newName, setNewName] = useState('REJECT');
+  const [newType, setNewType] = useState<StationType>('BIN');
   const [msg, setMsg] = useState('');
   const teaching = tel?.state === 'TEACH';
   const run = async (cmd: string) => { const r = await send(cmd); setMsg(r ? `${r.ok ? 'OK' : 'ERR'} ${r.cmd} ${r.text}` : 'no reply'); return r; };
+  const runAndReload = async (cmd: string) => { const r = await run(cmd); await loadLayout(); return r; };
   const jog = (dx: number, dy: number, dz: number, dr = 0) => run(fmt.jog(dx * step, dy * step, dz * step, dr * step * 5));
 
   return (
@@ -40,23 +45,39 @@ export function TeachPanel() {
         ))}
       </div>
       <table className="poses">
-        <thead><tr><th>Pose</th><th>x</th><th>y</th><th>z</th><th>roll</th><th /></tr></thead>
+        <thead><tr><th>Station</th><th>x</th><th>y</th><th>z</th><th>roll</th><th /></tr></thead>
         <tbody>
-          {POSE_NAMES.map(n => {
-            const p = poses[n];
-            return (
-              <tr key={n}>
-                <td>{n}</td>
-                {p ? [p.x, p.y, p.z, p.roll].map((v, i) => <td key={i}>{v.toFixed(1)}</td>) : <td colSpan={4} className="muted">—</td>}
-                <td className="nowrap">
-                  <button onClick={async () => { await run(`SAVE ${n}`); await refreshPoses(); }}>Save</button>
-                  <button onClick={() => run(`GO ${n}`)}>Go</button>
-                </td>
-              </tr>
-            );
-          })}
+          {layout.stations.map(p => (
+            <tr key={p.name}>
+              <td title={p.type}>{p.name}</td>
+              {[p.x, p.y, p.z, p.roll].map((v, i) => <td key={i}>{v.toFixed(0)}</td>)}
+              <td className="nowrap">
+                <button title="save the current tip pose here (validated, committed)" onClick={() => runAndReload(`SAVE ${p.name}`)}>Save</button>
+                <button title="straight to the grip pose" onClick={() => run(`GO ${p.name}`)}>Go</button>
+                <button title="above the station, then a slow line down" onClick={() => run(`ST GO ${p.name}`)}>Preview</button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
+      <div className="row">
+        <input aria-label="new station name" value={newName} maxLength={7} size={8} onChange={e => setNewName(e.target.value.toUpperCase())} />
+        <select aria-label="new station type" value={newType} onChange={e => setNewType(e.target.value as StationType)}>
+          {STATION_TYPES.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <button onClick={() => runAndReload(`ST ADD ${newName} ${newType}`)}>Add station here</button>
+        <button onClick={() => runAndReload('ST COMMIT')}>Commit</button>
+      </div>
+      <div className="row">
+        {MAP_COLOURS.map(c => (
+          <label key={c} className="num">{c} →
+            <select value={layout.map[c] ?? '-'} onChange={e => runAndReload(fmt.stMap(c, e.target.value === '-' ? null : e.target.value))}>
+              <option value="-">—</option>
+              {layout.stations.filter(s => s.type === 'BIN').map(s => <option key={s.name}>{s.name}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
       <div className="row">
         <span className="muted small">Colour cal (cube on sensor):</span>
         {['RED', 'BLUE', 'EMPTY'].map(c => <button key={c} onClick={() => run(`CAL ${c}`)}>CAL {c}</button>)}

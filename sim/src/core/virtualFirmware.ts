@@ -2,25 +2,26 @@
 // running against a small simulated world (joints with speed limits, limit switches, IR beam,
 // colour sensor, a cube, two bins). Port of firmware/src/{5_tasks,6_app}; keep them in sync.
 import {
-  BASE_MAX_ACC_DPS2, CELL, COLOUR_TRIES, FW_VERSION, GRIP_CLOSED_MM, GRIP_OPEN_MM, HOME_DIR, HOME_SWITCH_DEG, HOMING,
-  JOINT_MAX, JOINT_MAX_DPS, JOINT_MIN, LINE, MOVE, PICK_RETRIES, PLACE_ABOVE_DZ, RAMP, REHOME_EVERY,
-  SAFE_Z, TIMING,
+  BASE_MAX_ACC_DPS2, COLOUR_TRIES, FW_VERSION, GRIP_CLOSED_MM, GRIP_OPEN_MM, HOME_DIR, HOME_SWITCH_DEG, HOMING,
+  JOINT_MAX, JOINT_MAX_DPS, JOINT_MIN, LINE, MOVE, PICK_RETRIES, RAMP, REHOME_EVERY, STATION, TIMING,
 } from './config';
 import { fk, ik, withinLimits, type Pose } from './kinematics';
-import { COLOURS, ERRORS, POSE_NAMES, STATES, type Colour, type StateName } from '../link/protocol';
+import { aboveZ, MAP_COLOURS, STATION_TYPES, StationTable, type MapColour, type StError, type StationType } from './stations';
+import { COLOURS, ERRORS, STATES, type Colour, type StateName } from '../link/protocol';
 
-type CubeColour = 'RED' | 'BLUE';
+type CubeColour = 'RED' | 'BLUE' | 'PURPLE';   // purple = neither: the "unknown colour" test cube
 export type World = {
   cube: { colour: CubeColour; where: 'cradle' | 'gripper' } | null;
   failNextPick: boolean;        // the next grasp slips: cube stays in the cradle
   powerOk: boolean;             // false = E-stop pressed
   brokenSwitch: boolean[];      // NC wire cut → reads "pressed" forever
-  bins: { A: number; B: number };
+  bins: Record<string, number>;   // cubes dropped per bin station
 };
 
 type Rgbc = { r: number; g: number; b: number; c: number };
-const SENSOR: Record<'RED' | 'BLUE' | 'EMPTY', Rgbc> = {
+const SENSOR: Record<CubeColour | 'EMPTY', Rgbc> = {
   RED: { r: 620, g: 180, b: 150, c: 950 }, BLUE: { r: 140, g: 260, b: 560, c: 900 }, EMPTY: { r: 60, g: 65, b: 70, c: 200 },
+  PURPLE: { r: 380, g: 210, b: 360, c: 920 },
 };
 const TICK_MS = 5;
 const clamp = (j: number, v: number) => Math.min(JOINT_MAX[j], Math.max(JOINT_MIN[j], v));
@@ -40,7 +41,8 @@ function trapezoid(k: number) {
 export class VirtualFirmware {
   now = 0;
   q = [20, 40, 90, 0, 0, 0, GRIP_OPEN_MM];       // true joint values (arm left in an unknown pose)
-  world: World = { cube: null, failNextPick: false, powerOk: true, brokenSwitch: [false, false, false], bins: { A: 0, B: 0 } };
+  world: World = { cube: null, failNextPick: false, powerOk: true, brokenSwitch: [false, false, false], bins: {} };
+  stations = new StationTable();                // the workcell layout (ST commands)
   private out: (line: string) => void;
 
   constructor(out: (line: string) => void) { this.out = out; this.boot(); }
@@ -59,8 +61,9 @@ export class VirtualFirmware {
     this.mv = { from: this.q.slice(), to, t0: this.now, T: Math.max(T, 50) };
   }
   private targets() { return this.mv ? this.mv.to.slice() : this.q.slice(); }
-  private busy() { return !!this.mv || !!this.run || this.wp.length > 0; }
-  private stop() { this.mv = null; this.run = null; this.wp = []; }
+  private pv: Pose | null = null;                 // ST GO preview: line down onto this once above it
+  private busy() { return !!this.mv || !!this.run || this.wp.length > 0 || !!this.pv; }
+  private stop() { this.mv = null; this.run = null; this.wp = []; this.pv = null; }
   where(): Pose { return fk(this.q); }
 
   private moveTo(p: Pose, ms = 0): boolean {
@@ -91,6 +94,12 @@ export class VirtualFirmware {
     this.wp = pts; this.wpMs = 1000 * d / n / (mmS > 0 ? mmS : LINE.defaultMmS);
     return true;
   }
+  private preview(i: number): boolean {               // ST GO: above the station, then a slow line down
+    const s = this.stations.layout.stations[i];
+    if (!this.moveTo({ ...s, z: aboveZ(s) }, MOVE.home)) return false;
+    this.pv = { x: s.x, y: s.y, z: s.z, roll: s.roll };
+    return true;
+  }
   private grip(mm: number, ms = MOVE.grip) { const t = this.targets(); t[6] = mm; this.startMove(t, ms); }
   private joint(j: number, v: number, ms: number) { const t = this.targets(); t[j] = v; this.startMove(t, ms); }
 
@@ -105,6 +114,7 @@ export class VirtualFirmware {
       const p = this.wp.shift()!, r = ik(p);
       this.startMove([...r.q, this.targets()[6]], this.wpMs);
     }
+    if (!this.mv && !this.run && !this.wp.length && this.pv) { const p = this.pv; this.pv = null; this.moveLine(p, STATION.previewMmS); }
   }
 
   // ───────────── sensors ─────────────
@@ -188,18 +198,18 @@ export class VirtualFirmware {
         break;
       case 'next':
         if (++h.i < 3) { h.phase = 'start'; break; }
-        if (!this.moveTo(this.poses.HOME, MOVE.home)) return fail('home_pose');
+        if (!this.moveTo(this.stations.layout.stations[0], MOVE.home)) return fail('home_pose');
         h.phase = 'gohome'; break;
       case 'gohome': if (!this.busy()) return 'done'; break;
     }
     return 'running';
   }
 
-  private seq = { phase: '', grip: CELL.cube as Pose, above: CELL.cube as Pose, j6: 0, ok: true };
+  private seq = { phase: '', grip: { x: 0, y: 0, z: 0, roll: 0 } as Pose, above: { x: 0, y: 0, z: 0, roll: 0 } as Pose, j6: 0, ok: true };
   private pickStart(attempt: number) {
-    const [dx, dy, dr] = this.gripOffset(attempt), c = this.poses.CUBE;
+    const [dx, dy, dr] = this.gripOffset(attempt), c = this.stations.pick();
     const g = { x: c.x + dx, y: c.y + dy, z: c.z, roll: c.roll + dr };
-    this.seq = { phase: 'above', grip: g, above: { ...g, z: SAFE_Z }, j6: 0, ok: true };
+    this.seq = { phase: 'above', grip: g, above: { ...g, z: aboveZ(c) }, j6: 0, ok: true };
     this.grip(GRIP_OPEN_MM);
     this.seq.ok = this.moveTo(this.seq.above, MOVE.above);
   }
@@ -219,8 +229,9 @@ export class VirtualFirmware {
     return 'running';
   }
   private placeStart(c: Colour) {
-    const drop = c === 'RED' ? this.poses.BIN_A : this.poses.BIN_B;
-    this.seq = { phase: 'transit', grip: drop, above: { ...drop, z: SAFE_Z + PLACE_ABOVE_DZ }, j6: 0, ok: true };
+    const bin = this.stations.binFor(c as MapColour);  // colour → bin map (ST MAP)
+    if (!bin) { this.seq.ok = false; return; }
+    this.seq = { phase: 'transit', grip: bin, above: { ...bin, z: aboveZ(bin) }, j6: 0, ok: true };
     this.seq.ok = this.moveTo(this.seq.above, MOVE.transit);
   }
   private placeUpdate(): 'running' | 'done' | 'failed' {
@@ -239,18 +250,18 @@ export class VirtualFirmware {
   // ───────────── world physics: grasp and release ─────────────
   private slipped = false;
   private updateWorld() {
-    const tip = this.where(), cube = this.world.cube, g = this.q[6];
+    const tip = this.where(), cube = this.world.cube, g = this.q[6], cradle = this.stations.pick();
     const near = (p: { x: number; y: number }, r: number) => Math.hypot(tip.x - p.x, tip.y - p.y) < r;
-    if (cube?.where === 'cradle' && g <= GRIP_CLOSED_MM + 1 && near(CELL.cube, 15) && tip.z < CELL.cube.z + 20 && !this.slipped) {
+    if (cube?.where === 'cradle' && g <= GRIP_CLOSED_MM + 1 && near(cradle, 15) && tip.z < cradle.z + 20 && !this.slipped) {
       if (this.world.failNextPick) { this.world.failNextPick = false; this.slipped = true; }
       else cube.where = 'gripper';
     }
     if (g > GRIP_CLOSED_MM + 5) {
       this.slipped = false;
       if (cube?.where === 'gripper') {
-        if (near(CELL.binA, 50)) { this.world.bins.A++; this.world.cube = null; }
-        else if (near(CELL.binB, 50)) { this.world.bins.B++; this.world.cube = null; }
-        else if (near(CELL.cube, 15)) cube.where = 'cradle';
+        const bin = this.stations.layout.stations.find(s => s.type === 'BIN' && near(s, 50));
+        if (bin) { this.world.bins[bin.name] = (this.world.bins[bin.name] ?? 0) + 1; this.world.cube = null; }
+        else if (near(cradle, 15)) cube.where = 'cradle';
         else this.world.cube = null;               // dropped on the table
       }
     }
@@ -261,7 +272,6 @@ export class VirtualFirmware {
   private manual = false; private calTarget: Colour | null = null;
   private attempt = 0; private colourTries = 0; private cubeColour: Colour = 'UNKNOWN'; private cubeRgbc = SENSOR.EMPTY;
   private tEnter = 0; private lastReading: Colour = 'UNKNOWN';
-  poses: Record<string, Pose> = { HOME: { ...CELL.home }, CUBE: { ...CELL.cube }, BIN_A: { ...CELL.binA }, BIN_B: { ...CELL.binB } };
   private pendingDone: string | null = null; private tTel = 0;
 
   private ev(what: string, arg?: string, n?: number) { this.out(`EV ${what}${arg ? ' ' + arg : ''}${n !== undefined ? ' ' + n : ''}`); }
@@ -271,7 +281,7 @@ export class VirtualFirmware {
     if (s === 'READ_COLOUR' || s === 'VERIFY') this.colourStart();
     if (s === 'PICK') this.pickStart(this.attempt);
     if (s === 'PLACE') this.placeStart(this.cubeColour);
-    if (s === 'RETURN') this.seq.ok = this.moveTo(this.poses.HOME, MOVE.home);
+    if (s === 'RETURN') this.seq.ok = this.moveTo(this.stations.layout.stations[0], MOVE.home);
     if (s === 'ERROR' || s === 'ESTOP') { this.stop(); this.running = false; this.manual = false; this.calTarget = null; }
   }
   private fail(e: number) { this.err = e; this.enter('ERROR'); this.ev('ERROR', ERRORS[e]); }
@@ -302,9 +312,12 @@ export class VirtualFirmware {
       case 'READ_COLOUR': {
         const c = this.colourDone(); if (!c) break;
         this.lastReading = c.colour;
-        if (c.colour === 'RED' || c.colour === 'BLUE') { this.cubeColour = c.colour; this.cubeRgbc = c.rgbc; this.ev('COLOUR', c.colour); this.enter('PICK'); }
-        else if (++this.colourTries < COLOUR_TRIES) this.colourStart();
-        else this.fail(2);
+        let target: Colour;
+        if ((c.colour === 'RED' || c.colour === 'BLUE') && this.stations.binFor(c.colour)) target = c.colour;
+        else if (++this.colourTries < COLOUR_TRIES) { this.colourStart(); break; }
+        else if (this.stations.binFor('UNKNOWN')) target = 'UNKNOWN';   // R4b: reject bin
+        else { this.fail(2); break; }
+        this.cubeColour = target; this.cubeRgbc = c.rgbc; this.ev('COLOUR', target); this.enter('PICK');
         break;
       }
       case 'PICK':
@@ -316,7 +329,7 @@ export class VirtualFirmware {
         const c = this.colourDone(); if (!c) break;
         this.lastReading = c.colour;
         if (!this.ir() && c.colour === 'EMPTY') {
-          this.lastColour = this.cubeColour; this.lastGood = this.chroma(this.cubeRgbc);
+          if (this.cubeColour !== 'UNKNOWN') { this.lastColour = this.cubeColour; this.lastGood = this.chroma(this.cubeRgbc); }
           this.ev('PICKED', undefined, this.attempt); this.enter('PLACE');
         } else if (++this.attempt < 1 + this.params.pick_retries) { this.ev('PICK_RETRY', undefined, this.attempt); this.enter('PICK'); }
         else this.fail(3);
@@ -354,7 +367,7 @@ export class VirtualFirmware {
     const cmd = tok[0].toUpperCase(), args = tok.slice(1), argc = args.length;
     const okLine = (data = '') => this.out(`OK ${cmd}${data ? ' ' + data : ''}`);
     const errLine = (why: string) => this.out(`ERR ${cmd} ${why}`);
-    const COMMANDS = ['PING', 'STATUS', 'HOME', 'RUN', 'STOP', 'RESET', 'TEACH', 'DONE', 'MOVE', 'LINE', 'MOVEJ', 'JOG', 'JOGJ', 'GRIP', 'SAVE', 'GO', 'POSES', 'CAL', 'SET'];
+    const COMMANDS = ['PING', 'STATUS', 'HOME', 'RUN', 'STOP', 'RESET', 'TEACH', 'DONE', 'MOVE', 'LINE', 'MOVEJ', 'JOG', 'JOGJ', 'GRIP', 'SAVE', 'GO', 'POSES', 'CAL', 'SET', 'ST'];
     if (!COMMANDS.includes(cmd)) return errLine('unknown');
     const numeric = ['MOVE', 'LINE', 'MOVEJ', 'JOG', 'JOGJ', 'GRIP'].includes(cmd);
     const a = args.map(Number);
@@ -372,7 +385,7 @@ export class VirtualFirmware {
       case 'PING': return okLine(`ras-arm ${FW_VERSION}`);
       case 'STATUS': return okLine(`${this.state} ${ERRORS[this.err]} homed=${+this.homed} running=${+this.running}`);
       case 'POSES':
-        for (const n of POSE_NAMES) { const p = this.poses[n]; this.out(`POSE ${n} ${[p.x, p.y, p.z, p.roll].map(v => v.toFixed(1)).join(' ')}`); }
+        for (const p of this.stations.layout.stations) this.out(`POSE ${p.name} ${[p.x, p.y, p.z, p.roll].map(v => v.toFixed(1)).join(' ')}`);
         break;
       case 'HOME':
         isMove = true;
@@ -385,7 +398,10 @@ export class VirtualFirmware {
       case 'RUN': if (this.state !== 'IDLE') why = 'state'; else if (this.manual) why = 'busy'; else this.running = true; break;
       case 'STOP': this.running = false; if (this.manual) { this.stop(); this.manual = false; } break;
       case 'TEACH': if (this.state !== 'IDLE') why = 'state'; else if (this.manual) why = 'busy'; else { this.running = false; this.enter('TEACH'); } break;
-      case 'DONE': if (this.state !== 'TEACH') why = 'state'; else { this.calTarget = null; this.enter('IDLE'); } break;
+      case 'DONE':
+        if (this.state !== 'TEACH') why = 'state';
+        else { this.calTarget = null; this.enter('IDLE'); if (this.stations.dirty) this.ev('WARN', 'uncommitted_layout'); }
+        break;
       case 'RESET':
         if (this.state !== 'ERROR' && this.state !== 'ESTOP') why = 'state';
         else if (this.estop()) why = 'estop';
@@ -421,11 +437,15 @@ export class VirtualFirmware {
         why = canMove(false); if (!why) { this.grip(a[0]); why = started(true, null); } isMove = true; break;
       case 'SAVE': case 'GO': {
         if (argc !== 1) return errLine('args');
-        const name = args[0].toUpperCase();
-        if (!(POSE_NAMES as readonly string[]).includes(name)) return errLine('pose');
+        const T = this.stations, i = T.find(args[0].toUpperCase());
+        if (i < 0) return errLine('pose');
         why = canMove(true);
-        if (!why && cmd === 'SAVE') this.poses[name] = this.where();
-        if (!why && cmd === 'GO') { why = started(this.moveTo(this.poses[name], MOVE.home), 'unreachable'); isMove = true; }
+        if (!why && cmd === 'SAVE') {                    // here, validated, committed at once
+          const e = T.set(i, this.where(), T.layout.stations[i].aboveDz);
+          if (e !== 'OK') return errLine(e);
+          T.commit();
+        }
+        if (!why && cmd === 'GO') { why = started(this.moveTo(T.layout.stations[i], MOVE.home), 'unreachable'); isMove = true; }
         break;
       }
       case 'CAL': {
@@ -440,6 +460,49 @@ export class VirtualFirmware {
         if (!(args[0] in this.params)) return errLine('key');
         this.params[args[0]] = Number(args[1]); break;
       }
+      case 'ST': {
+        const A = args.map(v => v.toUpperCase()), sub = A[0] ?? '', T = this.stations;
+        if (!['LIST', 'ADD', 'SET', 'DEL', 'MAP', 'GO', 'COMMIT', 'REVERT', 'FACTORY'].includes(sub)) return errLine('args');
+        if (sub === 'LIST') {
+          const r = (v: number) => Math.sign(v) * Math.round(Math.abs(v));      // like the C integer rounding
+          T.layout.stations.forEach((s, i) => this.out(`ST,${i},${s.name},${s.type},${[s.x, s.y, s.z, s.roll].map(r).join(',')},${s.aboveDz}`));
+          for (const c of MAP_COLOURS) this.out(`MAP,${c},${T.layout.map[c] ?? '-'}`);
+          break;
+        }
+        if (this.state !== 'TEACH') return errLine('NOT_TEACH');
+        const i = argc >= 2 ? T.find(A[1]) : -1, isType = (t: string): t is StationType => (STATION_TYPES as readonly string[]).includes(t);
+        let e: StError = 'OK';
+        switch (sub) {
+          case 'ADD': if (argc !== 3 || !isType(A[2])) return errLine('args'); e = T.add(A[1], A[2], this.where()); break;
+          case 'SET': {
+            if (argc < 6 || argc > 8) return errLine('args');
+            const v = args.slice(2, 7).map(Number);
+            if (v.some(n => !Number.isFinite(n))) return errLine('args');
+            const p = { x: v[0], y: v[1], z: v[2], roll: v[3] };
+            const dz = argc >= 7 ? Math.trunc(v[4]) : i >= 0 ? T.layout.stations[i].aboveDz : STATION.aboveDz;
+            if (i >= 0) { e = T.set(i, p, dz); break; }
+            const t = argc === 8 ? A[7] : 'BIN';
+            if (!isType(t)) return errLine('args');
+            e = T.add(A[1], t, p, dz); break;
+          }
+          case 'DEL': if (argc !== 2) return errLine('args'); e = i < 0 ? 'NAME' : T.del(i); break;
+          case 'MAP': {
+            if (argc !== 3) return errLine('args');
+            const name = A[2] === '-' ? null : A[2];
+            e = !(MAP_COLOURS as readonly string[]).includes(A[1]) || (name && T.find(name) < 0) ? 'NAME' : T.map(A[1] as MapColour, name);
+            break;
+          }
+          case 'GO':
+            if (argc !== 2) return errLine('args');
+            if (i < 0) { e = 'NAME'; break; }
+            why = canMove(true) ?? started(this.preview(i), 'unreachable'); isMove = true; break;
+          case 'COMMIT': T.commit(); break;
+          case 'REVERT': T.revert(); break;
+          case 'FACTORY': T.factory(); break;                 // still needs ST COMMIT
+        }
+        if (e !== 'OK') return errLine(e);
+        break;
+      }
     }
     if (why) return errLine(REASON[why]);
     okLine();
@@ -449,7 +512,7 @@ export class VirtualFirmware {
   private telemetry() {
     const p = this.where(), i = (v: number) => Math.round(v);
     this.out(['T', i(this.now), this.state, ...this.q.map(v => i(v * 10)), i(p.x), i(p.y), i(p.z),
-      +this.ir(), COLOURS.indexOf(this.lastReading), this.err, this.limits().map(Number).join(''), +this.estop()].join(','));
+      +this.ir(), COLOURS.indexOf(this.lastReading), this.err, this.limits().map(Number).join(''), +this.estop(), this.stations.version].join(','));
   }
 
   /** advance simulated time */

@@ -3,8 +3,8 @@ import { create } from 'zustand';
 import type { ArmLink, LogDir } from '../link/ArmLink';
 import { SerialLink } from '../link/SerialLink';
 import { VirtualLink } from '../link/VirtualLink';
-import { parsePose, type Colour, type Reply, type Telemetry } from '../link/protocol';
-import type { Pose } from '../core/kinematics';
+import { fmt, parseLayout, type Colour, type Reply, type Telemetry } from '../link/protocol';
+import { cadLayout, MAP_COLOURS, type Layout } from '../core/stations';
 
 export type Mode = 'virtual' | 'usb';
 export type LogLine = { id: number; dir: LogDir; text: string; t: number };
@@ -16,13 +16,18 @@ let logId = 0;
 type ArmState = {
   mode: Mode; link: ArmLink | null; connected: boolean; status: string; version: string;
   tel: Telemetry | null; history: Sample[]; log: LogLine[];
-  poses: Record<string, Pose>; cycles: number; cubeColour: Colour; lastEvent: string;
+  cycles: number; cubeColour: Colour; lastEvent: string;
+  // workcell layout: mirrors the arm (ST LIST) until edited here; 'edited' = local changes not sent yet
+  layout: Layout; edited: boolean; stErrors: Record<string, string>; selected: string | null; layoutVersion: number;
   setMode(m: Mode): void;
   connect(): Promise<void>;
   reconnect(): Promise<void>;
   disconnect(): void;
   send(cmd: string): Promise<Reply | null>;
-  refreshPoses(): Promise<void>;
+  loadLayout(): Promise<void>;
+  sendLayout(): Promise<string>;
+  editLayout(f: (l: Layout) => Layout): void;
+  select(name: string | null): void;
 };
 
 export const useArm = create<ArmState>((set, get) => {
@@ -33,17 +38,20 @@ export const useArm = create<ArmState>((set, get) => {
     link.onLog(addLog);
     link.onStatus((connected, info) => set({ connected, status: info }));
     link.onTelemetry(t => set(s => {
+      if (t.layout !== undefined && t.layout !== s.layoutVersion) {   // committed on the arm: re-read (unless editing)
+        if (!s.edited) queueMicrotask(() => void get().loadLayout());
+        s = { ...s, layoutVersion: t.layout };
+      }
       const now = performance.now();
       const history = [...s.history, { t: now, j: t.joints }];
       while (history.length && now - history[0].t > HISTORY_MS) history.shift();
-      return { tel: t, history };
+      return { tel: t, history, layoutVersion: s.layoutVersion };
     }));
     link.onEvent(e => {
       const [, what, arg] = e.split(' ');
       if (what === 'CYCLE') set({ cycles: Number(arg) });
       if (what === 'COLOUR') set({ cubeColour: arg as Colour });
-      if (what === 'HOMED') void get().refreshPoses();
-      if (e.startsWith('DONE SAVE') || e === 'DONE GO') void get().refreshPoses();
+
       set({ lastEvent: e });
     });
   };
@@ -52,13 +60,14 @@ export const useArm = create<ArmState>((set, get) => {
   const hello = async () => {
     for (let i = 0; i < 4 && get().connected; i++) {
       const r = await get().send('PING');
-      if (r?.ok) { set({ version: r.text.replace('ras-arm ', '') }); await get().refreshPoses(); return; }
+      if (r?.ok) { set({ version: r.text.replace('ras-arm ', '') }); await get().loadLayout(); return; }
     }
   };
 
   return {
     mode: 'virtual', link: null, connected: false, status: 'not connected', version: '',
-    tel: null, history: [], log: [], poses: {}, cycles: 0, cubeColour: 'UNKNOWN', lastEvent: '',
+    tel: null, history: [], log: [], cycles: 0, cubeColour: 'UNKNOWN', lastEvent: '',
+    layout: cadLayout(), edited: false, stErrors: {}, selected: null, layoutVersion: -1,
 
     setMode(m) { if (m !== get().mode) { get().disconnect(); set({ mode: m }); } },
 
@@ -66,7 +75,7 @@ export const useArm = create<ArmState>((set, get) => {
       get().disconnect();
       const link = get().mode === 'virtual' ? new VirtualLink() : new SerialLink();
       wire(link);
-      set({ link, tel: null, history: [], cycles: 0, version: '', poses: {} });
+      set({ link, tel: null, history: [], cycles: 0, version: '', layoutVersion: -1 });
       try { await link.connect(); await hello(); }
       catch (e) { set({ link: null, connected: false, status: (e as Error).message }); }
     },
@@ -87,13 +96,31 @@ export const useArm = create<ArmState>((set, get) => {
       catch (e) { addLog('info', (e as Error).message); return null; }
     },
 
-    async refreshPoses() {
-      const r = await get().send('POSES');
-      if (!r?.ok) return;
-      const poses: Record<string, Pose> = {};
-      for (const l of r.data) { const p = parsePose(l); if (p) poses[p.name] = { x: p.x, y: p.y, z: p.z, roll: p.roll }; }
-      set({ poses });
+    async loadLayout() {
+      const r = await get().send('ST LIST');
+      if (r?.ok) set({ layout: parseLayout(r.data), edited: false });
     },
+
+    /** draft → arm: TEACH, delete extras, ST SET each, ST MAP each, ST COMMIT, re-read. The arm has the last word. */
+    async sendLayout() {
+      const { send, layout } = get();
+      if (get().tel?.state !== 'TEACH' && !(await send('TEACH'))?.ok) return 'enter TEACH first (arm busy or not idle)';
+      const arm = await send('ST LIST');
+      if (!arm?.ok) return 'no answer to ST LIST';
+      const errors: Record<string, string> = {};
+      for (const s of parseLayout(arm.data).stations)
+        if (!layout.stations.some(d => d.name === s.name)) { const r = await send(`ST DEL ${s.name}`); if (!r?.ok) errors[s.name] = r?.text ?? 'no reply'; }
+      for (const s of layout.stations) { const r = await send(fmt.stSet(s)); if (!r?.ok) errors[s.name] = r?.text ?? 'no reply'; }
+      for (const c of MAP_COLOURS) { const r = await send(fmt.stMap(c, layout.map[c])); if (!r?.ok) errors[`map ${c}`] = r?.text ?? 'no reply'; }
+      await send('ST COMMIT');
+      await get().loadLayout();                       // show what the arm actually kept
+      set({ stErrors: errors });
+      const n = Object.keys(errors).length;
+      return n ? `sent; arm refused ${n}: ${Object.entries(errors).map(([k, v]) => `${k} ${v}`).join(', ')}` : 'sent and committed';
+    },
+
+    editLayout(f) { set(s => ({ layout: f(structuredClone(s.layout)), edited: true, stErrors: {} })); },
+    select(name) { set({ selected: name }); },
   };
 });
 

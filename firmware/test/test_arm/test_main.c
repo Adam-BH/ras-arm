@@ -15,6 +15,7 @@
 #include "../../src/2_devices/actuators.h"
 #include "../../src/2_devices/storage.h"
 #include "ik_vectors.h"
+#include "station_vectors.h"
 
 extern uint32_t fake_now; extern bool fake_power_ok, fake_ir_blocked; extern rgbc_t fake_rgbc;
 extern bool fake_limit_broken[], fake_limit_dead[];
@@ -226,6 +227,15 @@ void test_stations_validation_codes(void) {
   TEST_ASSERT_EQUAL(STE_KEEPOUT,     val(0, 160, 50, 90, STN_BIN));      // drop below the bin wall
   TEST_ASSERT_EQUAL(STE_TOO_CLOSE,   val(220, 40, 80, 0, STN_BIN));      // on top of the cradle
   TEST_ASSERT_EQUAL(STE_OK,          val(220, 40, 80, 0, STN_PARK));     // park poses have no footprint
+}
+void test_stations_golden_vectors(void) {                   // same vectors as the sim's stations.ts
+  fake_wipe_eeprom(); stations_init();                      // others = CAD layout
+  for (unsigned i = 0; i < STATION_N_VECTORS; i++) {
+    const int16_t *v = STATION_VECTORS[i];
+    pose_t p = {v[0], v[1], v[2], v[3]};
+    char msg[64]; snprintf(msg, sizeof msg, "vector %u (%d,%d,%d) type %d", i, v[0], v[1], v[2], v[5]);
+    TEST_ASSERT_EQUAL_MESSAGE(v[6], stations_validate(&p, v[4], (uint8_t)v[5], -1), msg);
+  }
 }
 void test_stations_table_edits(void) {
   fake_wipe_eeprom(); stations_init();
@@ -596,6 +606,7 @@ int main(void) {
   RUN_TEST(test_eeprom_crc);
   RUN_TEST(test_stations_defaults_valid);
   RUN_TEST(test_stations_validation_codes);
+  RUN_TEST(test_stations_golden_vectors);
   RUN_TEST(test_stations_table_edits);
   RUN_TEST(test_stations_eeprom);
   RUN_TEST(test_homing_unknown_start);

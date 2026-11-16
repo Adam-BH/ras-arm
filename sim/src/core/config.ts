@@ -16,10 +16,13 @@ export const HOMING = { fast: 30, slow: 4, backoff: 5, leaveMax: 15, margin: 10,
 export const CELL = {
   home: { x: 160, y: 0, z: 170, roll: 0 },
   cube: { x: 220, y: 0, z: 24, roll: 0 },
-  binA: { x: 0, y: 220, z: 78, roll: 0 },   // red
-  binB: { x: 0, y: -220, z: 78, roll: 0 },  // blue
+  binA: { x: 0, y: 220, z: 78, roll: 90 },   // red   (CAD default layout, see core/stations.ts)
+  binB: { x: 0, y: -220, z: 78, roll: -90 }, // blue
   cubeSize: 25,
 };
+export const J1_WORK_MIN = -90, J1_WORK_MAX = 90;
+// station table (firmware/src/4_motion/stations.c)
+export const STATION = { max: 8, nameLen: 7, aboveDz: 60, zMinTable: 10, rMinBase: 90, minGap: 80, binMinDropZ: 70, previewMmS: 20 };
 export const SAFE_Z = 110, PLACE_ABOVE_DZ = 20;
 export const GRIP_OPEN_MM = 45, GRIP_CLOSED_MM = 26;
 export const RAMP = 0.25;
