@@ -7,6 +7,8 @@ sim/dist/
 *.log
 # Python
 __pycache__/
+.venv/
+.pytest_cache/
 # Editors / OS
 .vscode/
 .idea/
