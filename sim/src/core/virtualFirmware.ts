@@ -2,7 +2,7 @@
 // running against a small simulated world (joints with speed limits, limit switches, IR beam,
 // colour sensor, a cube, two bins). Port of firmware/src/{5_tasks,6_app}; keep them in sync.
 import {
-  CELL, COLOUR_TRIES, FW_VERSION, GRIP_CLOSED_MM, GRIP_OPEN_MM, HOME_DIR, HOME_SWITCH_DEG, HOMING,
+  BASE_MAX_ACC_DPS2, CELL, COLOUR_TRIES, FW_VERSION, GRIP_CLOSED_MM, GRIP_OPEN_MM, HOME_DIR, HOME_SWITCH_DEG, HOMING,
   JOINT_MAX, JOINT_MAX_DPS, JOINT_MIN, LINE, MOVE, PICK_RETRIES, PLACE_ABOVE_DZ, RAMP, REHOME_EVERY,
   SAFE_Z, TIMING,
 } from './config';
@@ -54,6 +54,7 @@ export class VirtualFirmware {
     const to = target.map((v, j) => clamp(j, v));
     let T = ms;
     for (let j = 0; j < 7; j++) T = Math.max(T, Math.abs(to[j] - this.q[j]) / JOINT_MAX_DPS[j] / (1 - RAMP) * 1000);
+    T = Math.max(T, Math.sqrt(Math.abs(to[0] - this.q[0]) / (RAMP * (1 - RAMP) * BASE_MAX_ACC_DPS2)) * 1000);   // J1 accel cap
     this.run = null;
     this.mv = { from: this.q.slice(), to, t0: this.now, T: Math.max(T, 50) };
   }

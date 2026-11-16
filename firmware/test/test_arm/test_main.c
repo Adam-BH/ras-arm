@@ -118,8 +118,8 @@ void test_ik_golden_vectors(void) {                         // same vectors the 
 // ════════════════════ joints ════════════════════
 void test_joint_conversions(void) {
   TEST_ASSERT_EQUAL_INT32(800, joint_deg_to_steps(J1, 90));            // 8.89 steps/deg
-  TEST_ASSERT_EQUAL_INT32(-691, joint_deg_to_steps(J2, -10));          // 69.07
-  TEST_ASSERT_EQUAL_INT32(2222, joint_deg_to_steps(J3, 100));          // 22.22
+  TEST_ASSERT_EQUAL_INT32(-1266, joint_deg_to_steps(J2, -10));         // 126.6 (v2: 5.18 × 88/16, 1/8)
+  TEST_ASSERT_EQUAL_INT32(2889, joint_deg_to_steps(J3, 100));          // 28.9 (v2: 104/16, 1/8)
   TEST_ASSERT_EQUAL_UINT16(1500, joint_deg_to_us(J4, 0));              // centre
   TEST_ASSERT_EQUAL_UINT16(1833, joint_deg_to_us(J5, 45));             // 270° servo: 7.41 µs/deg
   TEST_ASSERT_EQUAL_UINT16(2000, joint_deg_to_us(J6, 45));             // 180° servo: 11.1 µs/deg

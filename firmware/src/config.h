@@ -46,8 +46,8 @@
 #define SERVO_UPDATE_MS  20          // servo ramps are sent at the frame rate (I²C is slow)
 
 // ───────────── Geometry (mm) ─────────────
-#define L1          180.0f  // shoulder → elbow
-#define L2          140.0f  // elbow → wrist
+#define L1          165.0f  // shoulder → elbow   (v2 design)
+#define L2          165.0f  // elbow → wrist      (v2 design)
 #define L3          110.0f  // wrist → gripper tip (kept vertical)
 #define H_SHOULDER  120.0f  // shoulder axis above the table
 #define IK_MAX_COS3 0.995f  // reject (nearly) straight elbow
@@ -59,9 +59,16 @@ enum { J1, J2, J3, J4, J5, J6, JG, NJ };   // JG = gripper (value in mm, not deg
 #define N_SERVOS   (NJ - N_STEPPERS)
 
 // steps per joint degree = 200 steps × microstep × ratio / 360  (microstep = shield jumpers)
-#define SPD_J1  (200.0f * 16 * 1.0f         / 360.0f)  //  8.89  direct drive, 1/16
-#define SPD_J2  (200.0f *  8 * 5.18f * 3.0f / 360.0f)  // 69.07  PG518 gearbox × belt 3, 1/8
-#define SPD_J3  (200.0f *  8 * 5.0f         / 360.0f)  // 22.22  belt ×5, 1/8
+#define MICROSTEP_J1  16
+#define MICROSTEP_J2  8           // TEAM TO CONFIRM: v2 report assumes 16× on J2/J3
+#define MICROSTEP_J3  8
+#define RATIO_J2_GEARBOX 5.18f             // PG518 planetary
+#define RATIO_J2_BELT   (88.0f / 16.0f)    // 16T → 88T = 5.5  (v2)
+#define RATIO_J3_BELT   (104.0f / 16.0f)   // 16T → 104T = 6.5 (v2)
+#define SPD_J1  (200.0f * MICROSTEP_J1 / 360.0f)                                     //   8.89 direct drive
+#define SPD_J2  (200.0f * MICROSTEP_J2 * RATIO_J2_GEARBOX * RATIO_J2_BELT / 360.0f)  // 126.6
+#define SPD_J3  (200.0f * MICROSTEP_J3 * RATIO_J3_BELT / 360.0f)                     //  28.9
+#define BASE_MAX_ACC_DPS2 143.0f  // J1 acceleration cap, 2.5 rad/s² (v2 report: base torque budget)
 // flip a motor's direction here if it turns the wrong way (1 or -1)
 #define DIR_SIGN_J1  1
 #define DIR_SIGN_J2  1

@@ -13,7 +13,7 @@ Run from the repo root:  python3 tools/ik_reference.py
 """
 import json, math, os
 
-L1, L2, L3, H = 180.0, 140.0, 110.0, 120.0
+L1, L2, L3, H = 165.0, 165.0, 110.0, 120.0
 COS3_MAX, COS3_MIN = 0.995, -1.0
 JMIN = [-100, -20, 20, -90, -100, -90]
 JMAX = [100, 110, 150, 90, 100, 90]

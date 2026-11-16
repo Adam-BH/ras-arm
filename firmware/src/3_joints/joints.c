@@ -1,6 +1,7 @@
 // LAYER 3 — JOINTS
 #include "joints.h"
 #include "../2_devices/actuators.h"
+#include <math.h>
 
 static const float SPD[N_STEPPERS] = {SPD_J1, SPD_J2, SPD_J3};
 
@@ -54,6 +55,10 @@ void joints_move(const angles_t *t, uint32_t ms) {
     float need = absf(joint_clamp(j, t->j[j]) - joint_angle(j)) / JOINT_MAX_DPS[j] / (1.0f - RAMP_FRACTION) * 1000.0f;
     if (need > ms) ms = (uint32_t)need + 1;
   }
+  // base: trapezoid accel = D / (f(1−f)T²) ≤ BASE_MAX_ACC_DPS2  →  T ≥ √(D / (f(1−f)·A))
+  float need = sqrtf(absf(joint_clamp(J1, t->j[J1]) - joint_angle(J1)) /
+                     (RAMP_FRACTION * (1.0f - RAMP_FRACTION) * BASE_MAX_ACC_DPS2)) * 1000.0f;
+  if (need > ms) ms = (uint32_t)need + 1;
   int32_t target[N_STEPPERS];
   for (uint8_t j = 0; j < N_STEPPERS; j++) target[j] = joint_deg_to_steps(j, joint_clamp(j, t->j[j]));
   steppers_move_to(target, ms);

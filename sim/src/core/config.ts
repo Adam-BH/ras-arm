@@ -1,5 +1,6 @@
 // Mirror of firmware/src/config.h (geometry, limits, workcell, speeds). Keep both in sync.
-export const L1 = 180, L2 = 140, L3 = 110, H_SHOULDER = 120;
+export const L1 = 165, L2 = 165, L3 = 110, H_SHOULDER = 120;   // v2 design
+export const BASE_MAX_ACC_DPS2 = 143;                          // J1 accel cap (2.5 rad/s²)
 export const IK_MAX_COS3 = 0.995, IK_MIN_COS3 = -1;
 
 //                       J1    J2   J3   J4    J5   J6  grip
