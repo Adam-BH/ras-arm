@@ -397,10 +397,10 @@ torque, repeatability 1.2 mm, cycle 7.2 s.
 
 | Member | Role |
 |---|---|
-| **Youssef El Mhamdi** · Chairman, IEEE IAS INSAT SBC | physics simulation (`pysim`); TODO: build-phase role |
-| Adam Bhouri | software and simulation lead (firmware, design model) per the design book; TODO: confirm |
-| Mariem (TODO: full name) | electronics lead (wiring rev F, power, drivers) per the design book |
-| Ilyes (TODO: full name) | TODO: role |
+| **Youssef El Mhamdi** · Chairman, IEEE IAS INSAT SBC | physics simulation (`pysim`) |
+| Adam Bhouri | software and simulation lead (firmware, design model) |
+| Mariem Jomaa | mechanical and electronics lead |
+| Ilyes Arfa | mechanical and electronics lead |
 
 ## 📄 License and acknowledgements
 
