@@ -19,11 +19,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Generator, Iterable
 
 from .config import FW
-from .firmware import FirmwareTwin
+from .firmware import TICK_MS, FirmwareTwin
 from .protocol import Reply, Telemetry, classify, command_name, parse_reply, parse_telemetry
 from .world import World
 
 MOTION_COMMANDS = {"HOME", "MOVE", "LINE", "MOVEJ", "JOG", "JOGJ", "GRIP", "GO", "CAL"}
+BOOTLOADER_MS = 1600          # UNO reset → optiboot waits for an upload → the sketch starts (web app: "~2 s")
 Script = Generator[None, None, object]
 
 
@@ -64,6 +65,10 @@ class Simulation:
         self._reply: Reply | None = None
         self.tasks: list[_Task] = []
         self.tel_sinks: list[Callable[[str], None]] = []
+        self.line_sinks: list[Callable[[str], None]] = []    # every line the board sends (the serial port)
+        self.t_ms = 0                                         # simulation clock (the board's millis() restarts)
+        self.booting_until: int | None = None                 # set while the UNO is in reset / bootloader
+        self.resets = 0
         self.on_tick: list[Callable[[], None]] = []
         self.fw = FirmwareTwin(self.world, self._on_line)
         believed = self.fw.q
@@ -73,6 +78,8 @@ class Simulation:
 
     # ───────────── lines from the firmware ─────────────
     def _on_line(self, line: str):
+        for sink in self.line_sinks:
+            sink(line)
         kind = classify(line)
         if kind == "telemetry":
             self.tel = parse_telemetry(line)
@@ -81,24 +88,48 @@ class Simulation:
             return
         if kind == "reply":
             self._reply = parse_reply(line)
-        ms = self.fw.now if hasattr(self, "fw") else 0
+        ms = self.t_ms
         self.log.append(LogLine(ms, line))
         if self.echo:
             self.echo(ms, line)
 
     @property
     def now(self) -> int:
-        return self.fw.now
+        return self.t_ms
+
+    @property
+    def booting(self) -> bool:
+        return self.booting_until is not None
 
     def send(self, cmd: str) -> Reply:
         """one protocol line → its OK / ERR reply (synchronous, like the firmware's console)"""
+        if self.booting:                                   # the bootloader drops what the host sends
+            return Reply(False, command_name(cmd), "board resetting")
         self._reply = None
         self.fw.input(cmd)
         return self._reply or Reply(True, command_name(cmd), "")
 
+    def reboot(self, bootloader_ms: int = BOOTLOADER_MS):
+        """reset the UNO, like a host opening the USB port (DTR) or the reset button: the board goes silent,
+        EN is pulled up (steppers off, the arm may sag), the PCA9685 keeps the servos where they were; then
+        the sketch starts again from scratch (step counters 0, millis() 0, EV BOOT, homing)"""
+        self.booting_until = self.t_ms + bootloader_ms
+        self.world.drivers_enabled = False
+        self.resets += 1
+
+    def _finish_boot(self):
+        self.booting_until = None
+        self.fw = FirmwareTwin(self.world, self._on_line)
+        self.world.drivers_enabled = True
+
     # ───────────── the clock ─────────────
     def tick(self):
-        self.fw.tick()
+        self.t_ms += TICK_MS
+        if self.booting:
+            if self.t_ms >= self.booting_until:
+                self._finish_boot()
+        else:
+            self.fw.tick()
         self.world.drive(self.fw.q)
         self.world.step()                                   # 5 ms of physics in 1 ms substeps
         for t in self.tasks:

@@ -32,11 +32,12 @@ HELP = """sim commands (firmware commands go straight to the twin):
   !fail                the next grasp slips               !estop         toggle the motor rail
   !lose <j> <deg>      stepper j (1-3) skips deg          !break <j>     toggle switch j's wire (1-3)
   !snap                camera snapshot (+ mask) window    !speed <x>     sim speed (1 = real time)
-  !bins                count the cubes in the bins        !quit"""
+  !bins                count the cubes in the bins        !reset         reset the board (like a USB reconnect)
+  !quit"""
 
 
 class Gui:
-    def __init__(self, sim: Simulation, camera_window: bool = True):
+    def __init__(self, sim: Simulation, camera_window: bool = True, bridge=None):
         self.sim, self.w = sim, sim.world
         self.cam = OverheadCamera(self.w.cid)
         self.camera_window = camera_window
@@ -47,6 +48,7 @@ class Gui:
         self.status = ""
         self.sort_rep: SortReport | None = None
         self.quit = False
+        self.bridge = bridge
         self._text_ids: list[int] = []
         self._last_overlay = 0.0
         self._last_cam = 0.0
@@ -78,6 +80,7 @@ class Gui:
             ("FAULT: E-stop (toggle rail)", self._estop),
             ("FAULT: J1 skips 6 deg", lambda: self._lose(0, 6.0)),
             ("FAULT: J2 switch wire (toggle)", lambda: self._break(1)),
+            ("Board reset (like a USB reconnect)", self.sim.reboot),
         ]
         for label, fn in add:
             bid = p.addUserDebugParameter(label, 1, 0, 0, physicsClientId=self.cid)
@@ -196,6 +199,8 @@ class Gui:
                     self._snap()
                 elif cmd == "speed":
                     self.sim.set_speed(float(args[0]))
+                elif cmd == "reset":
+                    self.sim.reboot()
                 elif cmd == "bins":
                     self._say(f"# bins {self.w.bin_counts()}")
                 elif cmd == "quit":
@@ -224,7 +229,8 @@ class Gui:
         bins = self.w.bin_counts()
         tip = fw.where()
         lines = [
-            f"{fw.state}  err {ERRORS[fw.err]}  homed {int(fw.homed)}  running {int(fw.running)}  cycles {fw.cycles}",
+            ("UNO RESETTING (bootloader)" if self.sim.booting else
+             f"{fw.state}  err {ERRORS[fw.err]}  homed {int(fw.homed)}  running {int(fw.running)}  cycles {fw.cycles}"),
             f"tip {tip.x:.0f} {tip.y:.0f} {tip.z:.0f} roll {tip.roll:.0f}   grip {fw.q[6]:.0f} mm"
             f"   IR {int(fw.ir())}  colour {fw.last_reading}",
             f"bins  A {bins['A']}  B {bins['B']}" + (f"  (wrong: {bins['A_wrong'] + bins['B_wrong']})"
@@ -234,7 +240,9 @@ class Gui:
         ]
         if self.sort_rep and "sort" in self.sim.busy_scripts():
             lines.append(f"vision sort: {self.sort_rep.text}")
-        base = [-0.27, 0.0, 0.50]
+        if self.bridge:
+            lines.append(f"{self.bridge.describe()}  (in {self.bridge.lines_in} / out {self.bridge.lines_out} lines)")
+        base = [-0.30, 0.0, 0.66]
         for k, txt in enumerate(lines):
             kw = {"replaceItemUniqueId": self._text_ids[k]} if k < len(self._text_ids) else {}
             tid = p.addUserDebugText(txt, [base[0], base[1], base[2] - 0.028 * k], [0.95, 0.95, 0.95], 1.15,

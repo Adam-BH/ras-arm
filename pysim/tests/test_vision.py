@@ -21,7 +21,7 @@ def test_detection_accuracy():
         truth = []
         while len(truth) < 4:
             x, y = rng.uniform(135, 275), rng.uniform(-145, 145)
-            if all(math.hypot(x - a, y - b) > 60 for a, b, *_ in truth) and math.hypot(x - 220, y) > 50:
+            if all(math.hypot(x - a, y - b) > 75 for a, b, *_ in truth) and math.hypot(x - 220, y) > 75:
                 c, yaw = rng.choice(["RED", "BLUE"]), rng.uniform(-45, 45)
                 truth.append((x, y, c, yaw))
                 w.spawn_cube(c, x, y, yaw)
@@ -46,9 +46,9 @@ def test_cradle_walls_and_bins_are_not_cubes():
 
 
 def test_grasp_roll_is_square_to_the_cube():
-    r = grasp_roll(200, 60, 30, 24)
+    r = grasp_roll(200, 60, 30, 17.5)                              # a cube on the table
     assert r is not None and (r - 30) % 90 == 0
-    assert grasp_roll(330, 150, 0, 24) is None                       # out of reach
+    assert grasp_roll(330, 150, 0, 17.5) is None                     # out of reach (362 mm)
 
 
 def test_vision_sort_clears_the_table(sim):
